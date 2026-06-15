@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import inspect
-import json
-import os
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -11,11 +9,13 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from app.models.bot_config import BotConfig
+from app.services.bot_registry import BotRegistryError, registry
+
 router = APIRouter()
 
-_BOT_ALIASES: dict[str, str] | None = None
-_BOT_CACHE: dict[str, Bot] = {}
 _BOT_FACTORY: Callable[[str], Bot] = Bot
+_DYNAMIC_BOT_CACHE: dict[str, Bot] = {}
 
 
 class TelegramCompatError(Exception):
@@ -74,7 +74,8 @@ def configure_bot_factory(factory: Callable[[str], Bot]) -> None:
     """Переопределяет фабрику Bot для тестов или DI-контейнера."""
     global _BOT_FACTORY
     _BOT_FACTORY = factory
-    _BOT_CACHE.clear()
+    registry.set_bot_factory(factory)
+    _DYNAMIC_BOT_CACHE.clear()
 
 
 def reset_bot_factory() -> None:
@@ -83,38 +84,32 @@ def reset_bot_factory() -> None:
 
 
 def clear_bot_cache() -> None:
-    _BOT_CACHE.clear()
+    _DYNAMIC_BOT_CACHE.clear()
+    registry.set_bot_factory(_BOT_FACTORY)
 
 
-def get_bot_aliases() -> dict[str, str]:
-    global _BOT_ALIASES
-    if _BOT_ALIASES is not None:
-        return _BOT_ALIASES
+def _dynamic_bot(token: str) -> Bot:
+    if token not in _DYNAMIC_BOT_CACHE:
+        _DYNAMIC_BOT_CACHE[token] = _BOT_FACTORY(token)
+    return _DYNAMIC_BOT_CACHE[token]
 
-    raw_aliases = os.getenv("TELEGRAM_BOT_ALIASES", "{}")
+
+async def get_bot(token_or_id_or_alias: str) -> Bot:
     try:
-        aliases = json.loads(raw_aliases)
-    except json.JSONDecodeError as exc:
-        raise TelegramCompatError("Invalid TELEGRAM_BOT_ALIASES JSON", 500) from exc
+        await registry.load_active_bots()
+    except BotRegistryError as exc:
+        raise TelegramCompatError(str(exc), 500) from exc
 
-    if not isinstance(aliases, dict) or not all(
-        isinstance(alias, str) and isinstance(token, str) for alias, token in aliases.items()
-    ):
-        raise TelegramCompatError("TELEGRAM_BOT_ALIASES must be a JSON object with string values", 500)
+    bot = registry.get_bot(token_or_id_or_alias)
+    if bot is not None:
+        return bot
 
-    _BOT_ALIASES = aliases
-    return _BOT_ALIASES
-
-
-def resolve_token(token_or_alias: str) -> str:
-    return get_bot_aliases().get(token_or_alias, token_or_alias)
+    # Прямая передача токена сохраняет совместимость с Telegram Bot API proxy.
+    return _dynamic_bot(token_or_id_or_alias)
 
 
-def get_bot(token_or_alias: str) -> Bot:
-    token = resolve_token(token_or_alias)
-    if token not in _BOT_CACHE:
-        _BOT_CACHE[token] = _BOT_FACTORY(token)
-    return _BOT_CACHE[token]
+def get_bot_config(token_or_id_or_alias: str) -> BotConfig | None:
+    return registry.get_config(token_or_id_or_alias)
 
 
 def serialize_result(result: Any) -> Any:
@@ -186,7 +181,7 @@ async def telegram_compat(token: str, method: str, request: Request) -> JSONResp
     try:
         raw_params = dict(request.query_params) if request.method == "GET" else await read_params(request)
         params = validate_params(method, raw_params)
-        bot = get_bot(token)
+        bot = await get_bot(token)
         result = await call_bot_method(bot, method, params)
     except TelegramCompatError as exc:
         return telegram_response(False, exc.status_code, description=exc.description)
