@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>TG Connect Admin</title>
+  <style>
+    body{font-family:Arial,sans-serif;margin:2rem;background:#f6f7fb;color:#18202f} table{border-collapse:collapse;width:100%;background:#fff} th,td{border:1px solid #dde2ee;padding:.6rem;text-align:left;vertical-align:top} input,textarea{width:100%;box-sizing:border-box;padding:.5rem;margin:.2rem 0 .8rem} .card{background:#fff;border:1px solid #dde2ee;border-radius:8px;padding:1rem;margin-bottom:1rem}.ok{color:#147a2e}.off{color:#a33}.row{display:flex;gap:.5rem;align-items:center}.row form{display:inline}.msg{background:#e7f3ff;padding:.75rem;border-radius:6px}</style>
+</head>
+<body>
+  <header class="row"><h1>TG Connect Admin</h1><form method="post" action="/admin/logout"><button>Выйти</button></form></header>
+  {% block content %}{% endblock %}
+</body>
+</html>

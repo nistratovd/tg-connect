@@ -10,6 +10,7 @@ from aiogram import Bot
 from pydantic import TypeAdapter, ValidationError
 
 from app.models.bot_config import BotConfig
+from app.services.admin_store import load_admin_bot_configs
 
 BotFactory = Callable[[str], Bot]
 ConfigLoader = Callable[[], Iterable[BotConfig | dict[str, Any]]]
@@ -120,11 +121,13 @@ def load_bot_configs_from_env() -> list[BotConfig]:
     Переменная должна содержать JSON-массив объектов BotConfig. Для обратной
     совместимости TELEGRAM_BOT_ALIASES преобразуется в минимальные конфигурации.
     """
+    admin_configs = load_admin_bot_configs()
+
     raw_configs = os.getenv("TELEGRAM_BOT_CONFIGS")
     if raw_configs:
         try:
             payload = json.loads(raw_configs)
-            return TypeAdapter(list[BotConfig]).validate_python(payload)
+            return [*admin_configs, *TypeAdapter(list[BotConfig]).validate_python(payload)]
         except (json.JSONDecodeError, ValidationError) as exc:
             raise BotRegistryError("Invalid TELEGRAM_BOT_CONFIGS JSON") from exc
 
@@ -140,8 +143,9 @@ def load_bot_configs_from_env() -> list[BotConfig]:
         raise BotRegistryError("TELEGRAM_BOT_ALIASES must be a JSON object with string values")
 
     return [
-        BotConfig(id=alias, name=alias, telegram_bot_token=token, bitrix_webhook_url=None)
-        for alias, token in aliases.items()
+        *admin_configs,
+        *(BotConfig(id=alias, name=alias, telegram_bot_token=token, bitrix_webhook_url=None)
+        for alias, token in aliases.items()),
     ]
 
 

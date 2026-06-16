@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from app.models.bot_config import BotConfig
+from app.services.admin_store import record_event
 from app.services.bot_registry import BotRegistryError, registry
 
 router = APIRouter()
@@ -183,9 +184,13 @@ async def telegram_compat(token: str, method: str, request: Request) -> JSONResp
         params = validate_params(method, raw_params)
         bot = await get_bot(token)
         result = await call_bot_method(bot, method, params)
+        record_event("outgoing", token, "delivered", {"method": method, "params": params})
     except TelegramCompatError as exc:
+        record_event("outgoing", token, "error", {"method": method}, exc.description)
         return telegram_response(False, exc.status_code, description=exc.description)
     except Exception as exc:  # noqa: BLE001 - совместимость с форматом ошибок Telegram Bot API.
-        return telegram_response(False, 500, description=str(exc) or exc.__class__.__name__)
+        description = str(exc) or exc.__class__.__name__
+        record_event("outgoing", token, "error", {"method": method}, description)
+        return telegram_response(False, 500, description=description)
 
     return telegram_response(True, result=serialize_result(result))

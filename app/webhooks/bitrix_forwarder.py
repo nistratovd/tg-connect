@@ -14,6 +14,8 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from app.services.admin_store import get_admin_bot_config, record_event
+
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/webhooks/telegram", tags=["telegram-webhooks"])
 
@@ -99,6 +101,10 @@ def get_bitrix_endpoints() -> dict[str, str]:
 
 
 def resolve_bitrix_endpoint(bot_key: str) -> str:
+    admin_config = get_admin_bot_config(bot_key)
+    if admin_config and admin_config.bitrix_webhook_url:
+        return str(admin_config.bitrix_webhook_url)
+
     endpoint = get_bitrix_endpoints().get(bot_key)
     if endpoint is None:
         raise BitrixForwarderError(f"Bitrix webhook URL is not configured for bot {bot_key}", 404)
@@ -157,7 +163,9 @@ async def forward_update(bot_key: str, request: Request, bot: Bot | None = None)
     endpoint = resolve_bitrix_endpoint(bot_key)
     update = await parse_update(request, bot=bot)
     payload = serialize_update(update)
-    return await deliver_to_bitrix(endpoint, payload)
+    result = await deliver_to_bitrix(endpoint, payload)
+    record_event("incoming", bot_key, "delivered" if result.delivered else "error", payload, result.error)
+    return result
 
 
 @router.post("/{bot_key}")
@@ -165,10 +173,13 @@ async def bitrix_telegram_webhook(bot_key: str, request: Request) -> JSONRespons
     try:
         result = await forward_update(bot_key, request)
     except BitrixForwarderError as exc:
+        record_event("incoming", bot_key, "error", error=exc.description)
         return JSONResponse(status_code=exc.status_code, content={"ok": False, "description": exc.description})
     except Exception as exc:  # noqa: BLE001 - endpoint webhook не должен падать без JSON-ответа.
         logger.exception("Непредвиденная ошибка обработки Telegram update", extra={"bot_key": bot_key})
-        return JSONResponse(status_code=500, content={"ok": False, "description": str(exc) or exc.__class__.__name__})
+        description = str(exc) or exc.__class__.__name__
+        record_event("incoming", bot_key, "error", error=description)
+        return JSONResponse(status_code=500, content={"ok": False, "description": description})
 
     status_code = 200 if result.delivered else 502
     return JSONResponse(status_code=status_code, content={"ok": result.delivered, "result": result.model_dump(exclude_none=True)})
