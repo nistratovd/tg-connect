@@ -1,0 +1,15 @@
+{% extends "base.html" %}{% block content %}
+<h2>{{ 'Редактирование бота' if bot else 'Создание бота' }}</h2>
+{% if errors %}<div class="card off"><strong>Ошибки валидации:</strong><pre>{{ errors }}</pre></div>{% endif %}
+<form class="card" method="post" action="{{ '/admin/bots/' ~ bot.id if bot else '/admin/bots' }}">
+{% if not bot %}<label>ID бота <input name="id" value=""></label>{% endif %}
+<label>Название <input name="name" value="{{ bot.name if bot else '' }}" required></label>
+<label>Telegram bot token <input name="telegram_bot_token" value="{{ bot.telegram_bot_token if bot else '' }}" required></label>
+<label>Endpoint Битрикс <input name="bitrix_webhook_url" value="{{ bot.bitrix_webhook_url if bot and bot.bitrix_webhook_url else '' }}" placeholder="https://example.bitrix24.ru/rest/..."></label>
+<label>Секрет webhook <input name="secret" value="{{ bot.secret if bot and bot.secret else '' }}"></label>
+<label>Разрешенные IP <input name="allowed_ips" value="{{ ', '.join(bot.allowed_ips) if bot else '' }}"></label>
+<label>Rate limit <input name="rate_limit" type="number" min="1" value="{{ bot.rate_limit if bot and bot.rate_limit else '' }}"></label>
+<label><input style="width:auto" type="checkbox" name="enabled" {% if not bot or bot.enabled %}checked{% endif %}> Бот включен</label>
+<button>Сохранить</button> <a href="/admin/">Отмена</a>
+</form>
+{% endblock %}

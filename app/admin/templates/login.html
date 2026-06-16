@@ -1,0 +1,5 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>Вход администратора</title></head><body>
+<h1>Вход администратора</h1>
+{% if error %}<p style="color:#a33">{{ error }}</p>{% endif %}
+<form method="post" action="/admin/login"><label>Пароль администратора <input type="password" name="password" autofocus></label><button>Войти</button></form>
+</body></html>
