@@ -23,6 +23,9 @@ class BotConfig(BaseModel):
     secret: str | None = None
     allowed_ips: list[str] = Field(default_factory=list)
     rate_limit: int | None = Field(default=None, ge=1)
+    hmac_secret: str | None = None
+    timestamp_tolerance_seconds: int = Field(default=300, ge=1)
+    max_request_body_bytes: int = Field(default=1024 * 1024, ge=1)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
@@ -34,3 +37,13 @@ class BotConfig(BaseModel):
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
+
+    @property
+    def require_hmac_signature(self) -> bool:
+        """Включает HMAC-проверку, если задан отдельный hmac_secret или legacy secret."""
+        return bool(self.hmac_secret or self.secret)
+
+    @property
+    def effective_hmac_secret(self) -> str | None:
+        """Возвращает секрет для подписи с поддержкой существующего поля secret."""
+        return self.hmac_secret or self.secret

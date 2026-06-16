@@ -7,8 +7,11 @@
 <label>Telegram bot token <input name="telegram_bot_token" value="{{ bot.telegram_bot_token if bot else '' }}" required></label>
 <label>Endpoint Битрикс <input name="bitrix_webhook_url" value="{{ bot.bitrix_webhook_url if bot and bot.bitrix_webhook_url else '' }}" placeholder="https://example.bitrix24.ru/rest/..."></label>
 <label>Секрет webhook <input name="secret" value="{{ bot.secret if bot and bot.secret else '' }}"></label>
+<label>HMAC secret <input name="hmac_secret" value="{{ bot.hmac_secret if bot and bot.hmac_secret else '' }}" placeholder="Если заполнен, требуется подпись запроса"></label>
 <label>Разрешенные IP <input name="allowed_ips" value="{{ ', '.join(bot.allowed_ips) if bot else '' }}"></label>
 <label>Rate limit <input name="rate_limit" type="number" min="1" value="{{ bot.rate_limit if bot and bot.rate_limit else '' }}"></label>
+<label>Допуск timestamp, сек. <input name="timestamp_tolerance_seconds" type="number" min="1" value="{{ bot.timestamp_tolerance_seconds if bot else 300 }}"></label>
+<label>Максимальный размер body, байт <input name="max_request_body_bytes" type="number" min="1" value="{{ bot.max_request_body_bytes if bot else 1048576 }}"></label>
 <label><input style="width:auto" type="checkbox" name="enabled" {% if not bot or bot.enabled %}checked{% endif %}> Бот включен</label>
 <button>Сохранить</button> <a href="/admin/">Отмена</a>
 </form>

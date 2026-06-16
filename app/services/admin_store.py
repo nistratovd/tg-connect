@@ -13,6 +13,7 @@ from aiogram import Bot
 from pydantic import TypeAdapter, ValidationError
 
 from app.models.bot_config import BotConfig
+from app.security_utils import mask_sensitive
 
 DEFAULT_ADMIN_STATE_PATH = "data/admin_state.json"
 _MAX_EVENTS = 100
@@ -82,10 +83,10 @@ def record_event(direction: str, bot_key: str, status: str, payload: Any | None 
             "id": secrets.token_hex(8),
             "created_at": utc_now().isoformat(),
             "direction": direction,
-            "bot_key": bot_key,
+            "bot_key": mask_sensitive(bot_key),
             "status": status,
-            "payload": payload,
-            "error": error,
+            "payload": mask_sensitive(payload),
+            "error": mask_sensitive(error),
         }
     )
     state["events"] = list(events)

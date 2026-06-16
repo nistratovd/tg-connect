@@ -57,7 +57,7 @@ async def login_form(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "login.html", {"error": None})
 
 
-@router.post("/login")
+@router.post("/login", response_model=None)
 async def login(request: Request) -> HTMLResponse | RedirectResponse:
     form = await request.form()
     if not secrets.compare_digest(str(form.get("password", "")), _admin_password()):
@@ -74,18 +74,18 @@ async def logout() -> RedirectResponse:
     return response
 
 
-@router.get("/", response_class=HTMLResponse)
+@router.get("/", response_class=HTMLResponse, response_model=None)
 async def dashboard(request: Request) -> HTMLResponse | RedirectResponse:
     bots = load_admin_bot_configs()
     return _render(request, "dashboard.html", bots=bots, events=recent_events(20), message=request.query_params.get("message"))
 
 
-@router.get("/bots/new", response_class=HTMLResponse)
+@router.get("/bots/new", response_class=HTMLResponse, response_model=None)
 async def new_bot(request: Request) -> HTMLResponse | RedirectResponse:
     return _render(request, "bot_form.html", bot=None, errors=[])
 
 
-@router.get("/bots/{bot_id}/edit", response_class=HTMLResponse)
+@router.get("/bots/{bot_id}/edit", response_class=HTMLResponse, response_model=None)
 async def edit_bot(request: Request, bot_id: str) -> HTMLResponse | RedirectResponse:
     bot = get_admin_bot_config(bot_id)
     if bot is None:
@@ -106,12 +106,15 @@ async def _config_from_form(request: Request, bot_id: str | None = None) -> BotC
         secret=str(form.get("secret") or "").strip() or None,
         allowed_ips=str(form.get("allowed_ips") or ""),
         rate_limit=int(form["rate_limit"]) if form.get("rate_limit") else None,
+        hmac_secret=str(form.get("hmac_secret") or "").strip() or None,
+        timestamp_tolerance_seconds=int(form["timestamp_tolerance_seconds"]) if form.get("timestamp_tolerance_seconds") else 300,
+        max_request_body_bytes=int(form["max_request_body_bytes"]) if form.get("max_request_body_bytes") else 1024 * 1024,
         created_at=existing.created_at if existing else now,
         updated_at=now,
     )
 
 
-@router.post("/bots")
+@router.post("/bots", response_model=None)
 async def create_bot(request: Request) -> HTMLResponse | RedirectResponse:
     if not _is_authenticated(request):
         return _redirect("/admin/login")
@@ -124,7 +127,7 @@ async def create_bot(request: Request) -> HTMLResponse | RedirectResponse:
     return _redirect_with_message("Бот создан")
 
 
-@router.post("/bots/{bot_id}")
+@router.post("/bots/{bot_id}", response_model=None)
 async def update_bot(request: Request, bot_id: str) -> HTMLResponse | RedirectResponse:
     if not _is_authenticated(request):
         return _redirect("/admin/login")
