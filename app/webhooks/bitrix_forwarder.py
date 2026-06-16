@@ -136,7 +136,12 @@ async def deliver_to_bitrix(endpoint: str, payload: dict[str, Any], settings: Fo
             try:
                 response = await client.post(endpoint, json=payload, timeout=settings.timeout_seconds)
                 last_status_code = response.status_code
-                response.raise_for_status()
+                if response.status_code >= 400:
+                    raise httpx.HTTPStatusError(
+                        f"HTTP {response.status_code}",
+                        request=getattr(response, "_request", None) or httpx.Request("POST", endpoint),
+                        response=response,
+                    )
                 return DeliveryResult(delivered=True, attempts=attempt, status_code=response.status_code)
             except (httpx.TimeoutException, httpx.HTTPError) as exc:
                 last_error = str(exc) or exc.__class__.__name__

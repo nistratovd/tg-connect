@@ -189,8 +189,7 @@ async def telegram_compat(token: str, method: str, request: Request) -> JSONResp
         record_event("outgoing", token, "error", {"method": method}, exc.description)
         return telegram_response(False, exc.status_code, description=exc.description)
     except Exception as exc:  # noqa: BLE001 - совместимость с форматом ошибок Telegram Bot API.
-        description = str(exc) or exc.__class__.__name__
-        record_event("outgoing", token, "error", {"method": method}, description)
-        return telegram_response(False, 500, description=description)
+        record_event("outgoing", token, "error", {"method": method}, str(exc) or exc.__class__.__name__)
+        return telegram_response(False, 500, description="Internal server error")
 
     return telegram_response(True, result=serialize_result(result))

@@ -115,3 +115,89 @@ def test_supported_methods(client, fake_bot_factory, method, payload, expected_c
     assert response.status_code == 200
     assert response.json()["ok"] is True
     assert fake_bot_factory["token"].calls[-1] == (expected_call, payload)
+
+
+def _signed_headers(secret: str, body: bytes, timestamp: int | None = None) -> dict[str, str]:
+    import hmac
+    import time
+    from hashlib import sha256
+
+    ts = str(timestamp or int(time.time()))
+    signature = hmac.new(secret.encode(), ts.encode() + b"." + body, sha256).hexdigest()
+    return {"x-tg-timestamp": ts, "x-tg-signature": signature}
+
+
+def test_security_accepts_valid_hmac_signature(client, fake_bot_factory, monkeypatch):
+    monkeypatch.setenv(
+        "TELEGRAM_BOT_CONFIGS",
+        '[{"id":"secure","name":"secure","telegram_bot_token":"321:securetoken","hmac_secret":"top-secret"}]',
+    )
+    body = b'{"chat_id":100,"text":"secure"}'
+
+    response = client.post(
+        "/botsecure/sendMessage",
+        content=body,
+        headers={"content-type": "application/json", **_signed_headers("top-secret", body)},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+
+
+def test_security_rejects_invalid_hmac_signature(client, fake_bot_factory, monkeypatch):
+    monkeypatch.setenv(
+        "TELEGRAM_BOT_CONFIGS",
+        '[{"id":"secure-bad","name":"secure-bad","telegram_bot_token":"322:securetoken","hmac_secret":"top-secret"}]',
+    )
+
+    response = client.post(
+        "/botsecure-bad/sendMessage",
+        json={"chat_id": 100, "text": "secure"},
+        headers={"x-tg-timestamp": "1", "x-tg-signature": "bad"},
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {"ok": False, "error": "invalid_signature"}
+
+
+def test_security_rejects_forbidden_ip(client, fake_bot_factory, monkeypatch):
+    monkeypatch.setenv(
+        "TELEGRAM_BOT_CONFIGS",
+        '[{"id":"ipbot","name":"ipbot","telegram_bot_token":"323:securetoken","allowed_ips":["10.0.0.0/8"]}]',
+    )
+
+    response = client.post(
+        "/botipbot/sendMessage",
+        json={"chat_id": 100, "text": "secure"},
+        headers={"x-forwarded-for": "192.168.1.10"},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"ok": False, "error": "forbidden"}
+
+
+def test_security_rate_limits_by_bot_ip_and_method(client, fake_bot_factory, monkeypatch):
+    monkeypatch.setenv(
+        "TELEGRAM_BOT_CONFIGS",
+        '[{"id":"limited","name":"limited","telegram_bot_token":"324:securetoken","rate_limit":1}]',
+    )
+    headers = {"x-forwarded-for": "203.0.113.10"}
+
+    first = client.post("/botlimited/sendMessage", json={"chat_id": 100, "text": "one"}, headers=headers)
+    second = client.post("/botlimited/sendMessage", json={"chat_id": 100, "text": "two"}, headers=headers)
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert second.json() == {"ok": False, "error": "rate_limited"}
+
+
+def test_security_limits_request_body_size(client, fake_bot_factory, monkeypatch):
+    monkeypatch.setenv(
+        "TELEGRAM_BOT_CONFIGS",
+        '[{"id":"small","name":"small","telegram_bot_token":"325:securetoken","max_request_body_bytes":10}]',
+    )
+
+    response = client.post("/botsmall/sendMessage", json={"chat_id": 100, "text": "too large"})
+
+    assert response.status_code == 413
+    assert response.json() == {"ok": False, "error": "request_too_large"}
