@@ -6,12 +6,13 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 
 from app.models.bot_config import BotConfig
+from app.queue.delivery import delivery_queue
 from app.security.secrets import is_masked_secret
 from app.services.admin_store import (
     check_bitrix,
@@ -22,6 +23,7 @@ from app.services.admin_store import (
     save_admin_bot_config,
 )
 from app.services.bot_registry import registry
+from app.webhooks.bitrix_forwarder import process_delivery_item
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 templates = Jinja2Templates(directory="app/admin/templates")
@@ -79,6 +81,29 @@ async def logout() -> RedirectResponse:
 async def dashboard(request: Request) -> HTMLResponse | RedirectResponse:
     bots = load_admin_bot_configs()
     return _render(request, "dashboard.html", bots=bots, events=recent_events(20), message=request.query_params.get("message"))
+
+
+@router.get("/delivery", response_class=HTMLResponse, response_model=None)
+async def delivery_dashboard(request: Request) -> HTMLResponse | RedirectResponse:
+    return _render(
+        request,
+        "delivery.html",
+        items=delivery_queue.recent(100),
+        dead_letters=delivery_queue.dead_letters(100),
+        stats=delivery_queue.stats(),
+        message=request.query_params.get("message"),
+    )
+
+
+@router.post("/delivery/{item_id}/retry")
+async def retry_delivery(request: Request, item_id: str, background_tasks: BackgroundTasks) -> RedirectResponse:
+    if not _is_authenticated(request):
+        return _redirect("/admin/login")
+    item = delivery_queue.retry_dead_letter(item_id)
+    if item is None:
+        return _redirect("/admin/delivery?message=" + quote("Dead-letter событие не найдено"))
+    background_tasks.add_task(process_delivery_item, item.id)
+    return _redirect("/admin/delivery?message=" + quote("Повторная доставка поставлена в очередь"))
 
 
 @router.get("/bots/new", response_class=HTMLResponse, response_model=None)

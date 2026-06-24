@@ -22,14 +22,14 @@ TG Connect — сервис-маршрутизатор между Telegram Bot A
   - ограничение размера тела запроса.
 - Шифрование Telegram token/HMAC secret/legacy secret в локальном state-файле.
 - Маскирование секретов в событиях и ответах.
-- Идемпотентность Telegram updates по `update_id`.
-- In-memory delivery queue и dead-letter фиксация ошибок доставки.
+- Дедупликация Telegram updates по `update_id` на уровне persistent delivery queue.
+- File-backed delivery queue, background-доставка и dead-letter фиксация ошибок доставки.
 - Health и metrics endpoints:
   - `/health/live`;
   - `/health/ready`;
   - `/metrics`.
 
-> Важно: текущая очередь доставки, идемпотентность и rate limit реализованы in-memory. Для production с несколькими инстансами сервис нужно доработать до Redis/PostgreSQL/RabbitMQ-backed хранения.
+> Важно: текущая очередь доставки хранится в JSON-файле и переживает рестарт одного процесса, но для production с несколькими инстансами ее следует заменить на PostgreSQL/Redis/RabbitMQ-backed backend. Rate limit пока остается in-memory.
 
 ---
 
@@ -348,6 +348,24 @@ Dashboard показывает последние входящие и исход
 
 Секреты в событиях маскируются.
 
+### Очередь доставки и dead-letter
+
+В административной панели доступен раздел **Очередь доставки**:
+
+```text
+https://<host>/admin/delivery
+```
+
+В нем можно увидеть:
+
+- последние события Telegram → Битрикс;
+- текущий статус `queued`, `processing`, `delivered` или `dead_letter`;
+- количество попыток доставки;
+- endpoint Битрикс;
+- ошибку последней доставки.
+
+Для `dead_letter` событий доступна кнопка **Повторить доставку**. После нажатия событие возвращается в статус `queued` и доставляется в Битрикс в background-задаче.
+
 ---
 
 ## Настройка обмена с Битрикс
@@ -574,11 +592,13 @@ export BITRIX_BOT_WEBHOOK_URLS='{"support":"https://bitrix.internal/local/tg-con
 
 1. распарсит payload как Telegram update;
 2. проверит `update_id` на дубликат;
-3. поставит событие в delivery queue;
-4. отправит JSON в endpoint Битрикс;
-5. зафиксирует статус доставки;
-6. при ошибке выполнит retry;
-7. при итоговой ошибке отметит событие как `dead_letter`.
+3. поставит событие в persistent delivery queue;
+4. вернет Telegram успешный прием webhook;
+5. в background-задаче отправит JSON в endpoint Битрикс;
+6. зафиксирует статус доставки;
+7. при ошибке выполнит retry;
+8. при итоговой ошибке отметит событие как `dead_letter`;
+9. позволит повторить dead-letter доставку из админки.
 
 ## Формат payload, который получит Битрикс
 
@@ -818,14 +838,14 @@ python -m compileall app
 7. Храните `TG_CONNECT_MASTER_KEY` вне репозитория.
 8. Делайте backup `ADMIN_STATE_PATH`, если используется файловое хранение.
 9. Следите за `/metrics` и событиями в админке.
-10. Для production доработайте persistent queue/storage вместо in-memory.
+10. Для горизонтального production-масштабирования замените file-backed queue на PostgreSQL/Redis/RabbitMQ backend.
 
 ---
 
 ## Ограничения текущей версии
 
-- Очередь доставки хранится в памяти процесса.
-- Идемпотентность хранится в памяти процесса.
+- Очередь доставки хранится в JSON-файле и подходит для одного инстанса; для нескольких инстансов нужен PostgreSQL/Redis/RabbitMQ backend.
+- Дедупликация `update_id` выполняется через delivery queue; отдельный распределенный idempotency backend еще не подключен.
 - Rate limit хранится в памяти процесса.
 - Административные настройки по умолчанию хранятся в JSON-файле.
 - Telegram Bot API совместимость покрывает только базовые методы.
@@ -839,10 +859,10 @@ python -m compileall app
 
 ## Рекомендуемые следующие доработки
 
-1. Persistent delivery queue на PostgreSQL/Redis/RabbitMQ.
-2. Background worker доставки в Битрикс.
-3. Исправление семантики идемпотентности для failed delivery.
-4. Admin UI для delivery queue/dead-letter и ручного retry.
+1. PostgreSQL/Redis/RabbitMQ backend для delivery queue при горизонтальном масштабировании.
+2. Отдельный worker-процесс для доставки в Битрикс вместо in-process background tasks.
+3. Расширенные retry policy с delayed retry, jitter и circuit breaker.
+4. Улучшенный admin UI для фильтрации delivery queue/dead-letter и просмотра payload.
 5. Расширение Telegram Bot API compatibility.
 6. Поддержка файлов и multipart upload.
 7. RBAC для админки.

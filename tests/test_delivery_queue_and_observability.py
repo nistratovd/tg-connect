@@ -64,9 +64,38 @@ def test_failed_delivery_is_added_to_dead_letter(monkeypatch):
 
     response = client.post("/webhooks/telegram/dead", json={"update_id": 778})
 
-    assert response.status_code == 502
+    assert response.status_code == 200
     assert delivery_queue.stats()["dead_letter"] == 1
     assert delivery_queue.dead_letters()[0].bot_key == "dead"
+
+
+def test_delivery_queue_persists_to_configured_file(monkeypatch, tmp_path):
+    path = tmp_path / "persistent_queue.json"
+    monkeypatch.setenv("DELIVERY_QUEUE_PATH", str(path))
+    delivery_queue.clear()
+
+    item = delivery_queue.enqueue("https://bitrix.example/webhook", "persist", {"update_id": 779})
+
+    assert path.exists()
+    assert delivery_queue.get(item.id).bot_key == "persist"
+
+
+def test_admin_can_retry_dead_letter(monkeypatch):
+    monkeypatch.setenv("BITRIX_BOT_WEBHOOK_URLS", '{"retry":"https://bitrix.example/webhook"}')
+    monkeypatch.setenv("BITRIX_FORWARD_RETRY_ATTEMPTS", "1")
+    FakeAsyncClient.responses = [httpx.Response(500)]
+    client = TestClient(app)
+
+    failed = client.post("/webhooks/telegram/retry", json={"update_id": 780})
+    item = delivery_queue.dead_letters()[0]
+    FakeAsyncClient.responses = [httpx.Response(200)]
+
+    client.cookies.set("admin_session", "admin")
+    retried = client.post(f"/admin/delivery/{item.id}/retry")
+
+    assert failed.status_code == 200
+    assert retried.status_code == 200
+    assert delivery_queue.get(item.id).status == "delivered"
 
 
 def test_health_and_metrics_endpoints(monkeypatch):

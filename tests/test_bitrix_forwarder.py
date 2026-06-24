@@ -114,9 +114,10 @@ def test_retries_delivery_errors_and_logs_failure(client, caplog):
 
     response = client.post("/webhooks/telegram/internal", json=update)
 
-    assert response.status_code == 502
-    assert response.json()["ok"] is False
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
     assert len(FakeAsyncClient.calls) == 2
+    assert response.json()["result"]["queue_item_id"]
     assert "Не удалось доставить Telegram update в Битрикс" in caplog.text
 
 

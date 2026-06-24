@@ -36,7 +36,7 @@ async def metrics() -> str:
     lines.extend(f'tg_connect_delivery_queue_items{{status="{status}"}} {count}' for status, count in queue_stats.items())
     lines.extend(
         [
-            "# HELP tg_connect_idempotency_records In-memory idempotency records.",
+            "# HELP tg_connect_idempotency_records In-memory idempotency records kept by legacy store.",
             "# TYPE tg_connect_idempotency_records gauge",
             f"tg_connect_idempotency_records {idempotency_size}",
             "",

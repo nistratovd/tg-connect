@@ -10,7 +10,7 @@ from typing import Any
 import httpx
 from aiogram import Bot
 from aiogram.types import Update
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -166,29 +166,46 @@ async def deliver_to_bitrix(endpoint: str, payload: dict[str, Any], settings: Fo
     )
 
 
+async def process_delivery_item(item_id: str) -> DeliveryResult | None:
+    """Доставляет один queued item в Битрикс и фиксирует итоговый статус."""
+    item = delivery_queue.mark_processing(item_id)
+    if item is None:
+        return None
+    result = await deliver_to_bitrix(item.endpoint, item.payload)
+    if result.delivered:
+        delivery_queue.mark_delivered(item.id, result.attempts)
+    else:
+        delivery_queue.mark_failed(item.id, result.attempts, result.error)
+    record_event("incoming", item.bot_key, "delivered" if result.delivered else "error", item.payload, result.error)
+    return result
+
+
+async def process_pending_deliveries(limit: int = 50) -> None:
+    """Обрабатывает pending outbox после рестарта или ручного retry."""
+    for item in delivery_queue.pending(limit):
+        await process_delivery_item(item.id)
+
+
 async def forward_update(bot_key: str, request: Request, bot: Bot | None = None) -> DeliveryResult:
     endpoint = resolve_bitrix_endpoint(bot_key)
     update = await parse_update(request, bot=bot)
     payload = serialize_update(update)
-    duplicate = await idempotency_store.seen_or_mark(bot_key, payload.get("update_id"))
-    if duplicate:
+    existing = delivery_queue.find_by_update(bot_key, payload.get("update_id"))
+    if existing and existing.status in {"queued", "processing", "delivered"}:
         record_event("incoming", bot_key, "duplicate", payload)
-        return DeliveryResult(delivered=True, attempts=0)
+        return DeliveryResult(delivered=True, attempts=existing.attempts, status_code=202)
 
     queue_item = delivery_queue.enqueue(endpoint, bot_key, payload)
-    result = await deliver_to_bitrix(endpoint, payload)
-    if result.delivered:
-        delivery_queue.mark_delivered(queue_item, result.attempts)
-    else:
-        delivery_queue.mark_failed(queue_item, result.attempts, result.error)
-    record_event("incoming", bot_key, "delivered" if result.delivered else "error", payload, result.error)
-    return result
+    record_event("incoming", bot_key, "queued", payload)
+    return DeliveryResult(delivered=True, attempts=0, status_code=202, error=queue_item.id)
 
 
 @router.post("/{bot_key}")
-async def bitrix_telegram_webhook(bot_key: str, request: Request) -> JSONResponse:
+async def bitrix_telegram_webhook(bot_key: str, request: Request, background_tasks: BackgroundTasks) -> JSONResponse:
     try:
         result = await forward_update(bot_key, request)
+        if result.error:
+            background_tasks.add_task(process_delivery_item, result.error)
     except BitrixForwarderError as exc:
         record_event("incoming", bot_key, "error", error=exc.description)
         return JSONResponse(status_code=exc.status_code, content={"ok": False, "description": exc.description})
@@ -198,5 +215,8 @@ async def bitrix_telegram_webhook(bot_key: str, request: Request) -> JSONRespons
         record_event("incoming", bot_key, "error", error=description)
         return JSONResponse(status_code=500, content={"ok": False, "description": description})
 
-    status_code = 200 if result.delivered else 502
-    return JSONResponse(status_code=status_code, content={"ok": result.delivered, "result": result.model_dump(exclude_none=True)})
+    payload = result.model_dump(exclude_none=True)
+    queue_item_id = payload.pop("error", None)
+    if queue_item_id:
+        payload["queue_item_id"] = queue_item_id
+    return JSONResponse(status_code=200, content={"ok": True, "result": payload})
