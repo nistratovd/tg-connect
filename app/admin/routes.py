@@ -6,12 +6,13 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 
 from app.models.bot_config import BotConfig
+from app.queue.delivery import delivery_queue
 from app.security.secrets import is_masked_secret
 from app.services.admin_store import (
     check_bitrix,
@@ -22,6 +23,8 @@ from app.services.admin_store import (
     save_admin_bot_config,
 )
 from app.services.bot_registry import registry
+from app.services.telegram_runner import telegram_runner
+from app.webhooks.bitrix_forwarder import process_delivery_item
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 templates = Jinja2Templates(directory="app/admin/templates")
@@ -81,6 +84,29 @@ async def dashboard(request: Request) -> HTMLResponse | RedirectResponse:
     return _render(request, "dashboard.html", bots=bots, events=recent_events(20), message=request.query_params.get("message"))
 
 
+@router.get("/delivery", response_class=HTMLResponse, response_model=None)
+async def delivery_dashboard(request: Request) -> HTMLResponse | RedirectResponse:
+    return _render(
+        request,
+        "delivery.html",
+        items=delivery_queue.recent(100),
+        dead_letters=delivery_queue.dead_letters(100),
+        stats=delivery_queue.stats(),
+        message=request.query_params.get("message"),
+    )
+
+
+@router.post("/delivery/{item_id}/retry")
+async def retry_delivery(request: Request, item_id: str, background_tasks: BackgroundTasks) -> RedirectResponse:
+    if not _is_authenticated(request):
+        return _redirect("/admin/login")
+    item = delivery_queue.retry_dead_letter(item_id)
+    if item is None:
+        return _redirect("/admin/delivery?message=" + quote("Dead-letter событие не найдено"))
+    background_tasks.add_task(process_delivery_item, item.id)
+    return _redirect("/admin/delivery?message=" + quote("Повторная доставка поставлена в очередь"))
+
+
 @router.get("/bots/new", response_class=HTMLResponse, response_model=None)
 async def new_bot(request: Request) -> HTMLResponse | RedirectResponse:
     return _render(request, "bot_form.html", bot=None, errors=[])
@@ -113,6 +139,7 @@ async def _config_from_form(request: Request, bot_id: str | None = None) -> BotC
         name=str(form.get("name") or "").strip(),
         telegram_bot_token=telegram_bot_token,
         bitrix_webhook_url=str(form.get("bitrix_webhook_url") or "").strip() or None,
+        telegram_update_mode=str(form.get("telegram_update_mode") or "webhook"),
         enabled=form.get("enabled") == "on",
         secret=legacy_secret,
         allowed_ips=str(form.get("allowed_ips") or ""),
@@ -133,6 +160,7 @@ async def create_bot(request: Request) -> HTMLResponse | RedirectResponse:
         config = await _config_from_form(request)
         save_admin_bot_config(config)
         await registry.reload()
+        await telegram_runner.reload()
     except ValidationError as exc:
         return templates.TemplateResponse(request, "bot_form.html", {"bot": None, "errors": exc.errors()}, status_code=400)
     return _redirect_with_message("Бот создан")
@@ -146,6 +174,7 @@ async def update_bot(request: Request, bot_id: str) -> HTMLResponse | RedirectRe
         config = await _config_from_form(request, bot_id=bot_id)
         save_admin_bot_config(config)
         await registry.reload()
+        await telegram_runner.reload()
     except ValidationError as exc:
         return templates.TemplateResponse(request, "bot_form.html", {"bot": get_admin_bot_config(bot_id), "errors": exc.errors()}, status_code=400)
     return _redirect_with_message("Бот обновлен")
@@ -162,6 +191,7 @@ async def toggle_bot(request: Request, bot_id: str) -> RedirectResponse:
     bot.updated_at = datetime.now(timezone.utc)
     save_admin_bot_config(bot)
     await registry.reload()
+    await telegram_runner.reload()
     return _redirect_with_message("Статус бота изменен")
 
 

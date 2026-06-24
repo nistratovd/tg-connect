@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from app.security.secrets import decrypt_secret, masked_telegram_token
 
@@ -21,6 +21,7 @@ class BotConfig(BaseModel):
     name: str = Field(..., min_length=1)
     telegram_bot_token: str = Field(..., min_length=1)
     bitrix_webhook_url: AnyHttpUrl | None = None
+    telegram_update_mode: Literal["webhook", "long_polling"] = "webhook"
     enabled: bool = True
     secret: str | None = None
     allowed_ips: list[str] = Field(default_factory=list)
