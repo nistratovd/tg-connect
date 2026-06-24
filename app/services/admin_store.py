@@ -13,6 +13,7 @@ from aiogram import Bot
 from pydantic import TypeAdapter, ValidationError
 
 from app.models.bot_config import BotConfig
+from app.security.secrets import encrypt_config_payload
 from app.security_utils import mask_sensitive
 
 DEFAULT_ADMIN_STATE_PATH = "data/admin_state.json"
@@ -63,7 +64,7 @@ def load_admin_bot_configs() -> list[BotConfig]:
 def save_admin_bot_config(config: BotConfig) -> None:
     state = load_state()
     bots = [bot for bot in state.get("bots", []) if bot.get("id") != config.id]
-    bots.append(config.model_dump(mode="json"))
+    bots.append(encrypt_config_payload(config.model_dump(mode="json")))
     state["bots"] = sorted(bots, key=lambda item: item["name"])
     save_state(state)
 
@@ -103,7 +104,7 @@ async def check_telegram(token: str) -> tuple[bool, str]:
         me = await bot.get_me()
         return True, f"Telegram OK: @{me.username or me.id}"
     except Exception as exc:  # noqa: BLE001 - диагностический чек должен вернуть текст ошибки.
-        return False, str(exc) or exc.__class__.__name__
+        return False, mask_sensitive(str(exc) or exc.__class__.__name__)
     finally:
         await bot.session.close()
 
@@ -118,4 +119,4 @@ async def check_bitrix(endpoint: str | None) -> tuple[bool, str]:
             return True, f"Битрикс ответил HTTP {response.status_code}"
         return False, f"Битрикс ответил HTTP {response.status_code}"
     except Exception as exc:  # noqa: BLE001 - диагностический чек должен вернуть текст ошибки.
-        return False, str(exc) or exc.__class__.__name__
+        return False, mask_sensitive(str(exc) or exc.__class__.__name__)

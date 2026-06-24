@@ -3,7 +3,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator
+from app.security.secrets import decrypt_secret, masked_telegram_token
+
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 def utc_now() -> datetime:
@@ -29,6 +31,16 @@ class BotConfig(BaseModel):
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
+    @model_validator(mode="before")
+    @classmethod
+    def decrypt_encrypted_secrets(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            data = dict(value)
+            for field in ("telegram_bot_token", "hmac_secret", "secret"):
+                data[field] = decrypt_secret(data.get(field))
+            return data
+        return value
+
     @field_validator("allowed_ips", mode="before")
     @classmethod
     def normalize_allowed_ips(cls, value: Any) -> list[str]:
@@ -47,3 +59,8 @@ class BotConfig(BaseModel):
     def effective_hmac_secret(self) -> str | None:
         """Возвращает секрет для подписи с поддержкой существующего поля secret."""
         return self.hmac_secret or self.secret
+
+    @property
+    def masked_telegram_bot_token(self) -> str:
+        """Безопасная маска Telegram-токена для административного интерфейса."""
+        return masked_telegram_token(self.telegram_bot_token)

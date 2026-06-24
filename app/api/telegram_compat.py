@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from app.models.bot_config import BotConfig
+from app.security_utils import mask_sensitive
 from app.services.admin_store import record_event
 from app.services.bot_registry import BotRegistryError, registry
 
@@ -174,7 +175,7 @@ async def call_bot_method(bot: Bot, method: str, params: dict[str, Any]) -> Any:
 
 
 def telegram_response(ok: bool, status_code: int = 200, **payload: Any) -> JSONResponse:
-    return JSONResponse(status_code=status_code, content={"ok": ok, **payload})
+    return JSONResponse(status_code=status_code, content=mask_sensitive({"ok": ok, **payload}))
 
 
 @router.api_route("/bot{token}/{method}", methods=["GET", "POST"])

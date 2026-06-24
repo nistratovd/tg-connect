@@ -10,6 +10,7 @@ from aiogram import Bot
 from pydantic import TypeAdapter, ValidationError
 
 from app.models.bot_config import BotConfig
+from app.security.secrets import masked_telegram_token
 from app.services.admin_store import load_admin_bot_configs
 
 BotFactory = Callable[[str], Bot]
@@ -99,7 +100,7 @@ class BotRegistry:
             if config.name in {item.name for item in configs}:
                 raise BotRegistryError(f"Duplicate bot alias: {config.name}")
             if config.telegram_bot_token in {item.telegram_bot_token for item in configs}:
-                raise BotRegistryError(f"Duplicate bot token: {config.telegram_bot_token}")
+                raise BotRegistryError(f"Duplicate bot token: {masked_telegram_token(config.telegram_bot_token)}")
             configs.append(config)
         return configs
 

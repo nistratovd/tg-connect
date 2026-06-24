@@ -12,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 
 from app.models.bot_config import BotConfig
+from app.security.secrets import is_masked_secret
 from app.services.admin_store import (
     check_bitrix,
     check_telegram,
@@ -97,16 +98,26 @@ async def _config_from_form(request: Request, bot_id: str | None = None) -> BotC
     form = await request.form()
     now = datetime.now(timezone.utc)
     existing = get_admin_bot_config(bot_id) if bot_id else None
+    telegram_bot_token = str(form.get("telegram_bot_token") or "").strip()
+    hmac_secret = str(form.get("hmac_secret") or "").strip() or None
+    legacy_secret = str(form.get("secret") or "").strip() or None
+    if existing and is_masked_secret(telegram_bot_token):
+        telegram_bot_token = existing.telegram_bot_token
+    if existing and is_masked_secret(hmac_secret):
+        hmac_secret = existing.hmac_secret
+    if existing and is_masked_secret(legacy_secret):
+        legacy_secret = existing.secret
+
     return BotConfig(
         id=bot_id or str(form.get("id") or form.get("name") or "").strip(),
         name=str(form.get("name") or "").strip(),
-        telegram_bot_token=str(form.get("telegram_bot_token") or "").strip(),
+        telegram_bot_token=telegram_bot_token,
         bitrix_webhook_url=str(form.get("bitrix_webhook_url") or "").strip() or None,
         enabled=form.get("enabled") == "on",
-        secret=str(form.get("secret") or "").strip() or None,
+        secret=legacy_secret,
         allowed_ips=str(form.get("allowed_ips") or ""),
         rate_limit=int(form["rate_limit"]) if form.get("rate_limit") else None,
-        hmac_secret=str(form.get("hmac_secret") or "").strip() or None,
+        hmac_secret=hmac_secret,
         timestamp_tolerance_seconds=int(form["timestamp_tolerance_seconds"]) if form.get("timestamp_tolerance_seconds") else 300,
         max_request_body_bytes=int(form["max_request_body_bytes"]) if form.get("max_request_body_bytes") else 1024 * 1024,
         created_at=existing.created_at if existing else now,
