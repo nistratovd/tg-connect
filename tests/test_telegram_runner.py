@@ -15,8 +15,8 @@ class FakeBot:
         self.updates = updates
         self.calls = []
 
-    async def get_updates(self, *, offset=None, timeout=None):
-        self.calls.append({"offset": offset, "timeout": timeout})
+    async def get_updates(self, *, offset=None, timeout=None, request_timeout=None):
+        self.calls.append({"offset": offset, "timeout": timeout, "request_timeout": request_timeout})
         updates, self.updates = self.updates, []
         return updates
 
@@ -79,8 +79,18 @@ def test_poll_once_enqueues_and_delivers_updates(monkeypatch):
     next_offset = asyncio.run(runner.poll_once(config, bot))
 
     assert next_offset == 901
-    assert bot.calls == [{"offset": None, "timeout": 1}]
+    assert bot.calls == [{"offset": None, "timeout": 1, "request_timeout": 11}]
     assert FakeAsyncClient.calls == [
         {"endpoint": "https://bitrix.example/webhook", "json": update_payload, "timeout": 5.0}
     ]
     assert delivery_queue.find_by_update("poll", 900).status == "delivered"
+
+
+def test_polling_request_timeout_is_above_long_poll_timeout(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_LONG_POLL_TIMEOUT_SECONDS", "30")
+    monkeypatch.setenv("TELEGRAM_LONG_POLL_REQUEST_TIMEOUT_SECONDS", "30")
+
+    runner = TelegramLongPollingRunner(BotRegistry(config_loader=lambda: []))
+
+    assert runner._poll_timeout_seconds == 30
+    assert runner._request_timeout_seconds == 40

@@ -8,6 +8,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 
 from aiogram import Bot
+from aiogram.exceptions import TelegramNetworkError
 from aiogram.types import Update
 
 from app.models.bot_config import BotConfig
@@ -39,12 +40,25 @@ class TelegramLongPollingRunner:
         update_handler: UpdateHandler = enqueue_update,
         delivery_processor: DeliveryProcessor = process_delivery_item,
         poll_timeout_seconds: int | None = None,
+        request_timeout_seconds: int | None = None,
         error_sleep_seconds: float | None = None,
     ) -> None:
         self._registry = bot_registry
         self._update_handler = update_handler
         self._delivery_processor = delivery_processor
         self._poll_timeout_seconds = poll_timeout_seconds or int(os.getenv("TELEGRAM_LONG_POLL_TIMEOUT_SECONDS", "30"))
+        self._request_timeout_seconds = request_timeout_seconds or int(
+            os.getenv("TELEGRAM_LONG_POLL_REQUEST_TIMEOUT_SECONDS", str(self._poll_timeout_seconds + 10))
+        )
+        if self._request_timeout_seconds <= self._poll_timeout_seconds:
+            logger.warning(
+                "TELEGRAM_LONG_POLL_REQUEST_TIMEOUT_SECONDS=%s не больше TELEGRAM_LONG_POLL_TIMEOUT_SECONDS=%s; "
+                "используем %s, чтобы aiohttp не обрывал штатный long polling",
+                self._request_timeout_seconds,
+                self._poll_timeout_seconds,
+                self._poll_timeout_seconds + 10,
+            )
+            self._request_timeout_seconds = self._poll_timeout_seconds + 10
         self._error_sleep_seconds = error_sleep_seconds or float(os.getenv("TELEGRAM_LONG_POLL_ERROR_SLEEP_SECONDS", "5"))
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._statuses: dict[str, RunnerStatus] = {}
@@ -84,7 +98,11 @@ class TelegramLongPollingRunner:
 
     async def poll_once(self, config: BotConfig, bot: Bot, offset: int | None = None) -> int | None:
         """Выполняет одну итерацию getUpdates и возвращает следующий offset."""
-        updates = await bot.get_updates(offset=offset, timeout=self._poll_timeout_seconds)
+        updates = await bot.get_updates(
+            offset=offset,
+            timeout=self._poll_timeout_seconds,
+            request_timeout=self._request_timeout_seconds,
+        )
         next_offset = offset
         for update in updates:
             await self._update_handler(config.id, update)
@@ -104,6 +122,11 @@ class TelegramLongPollingRunner:
                 offset = await self.poll_once(config, bot, offset)
             except asyncio.CancelledError:
                 raise
+            except TelegramNetworkError as exc:
+                logger.warning("Сетевая ошибка long polling для бота %s: %s", config.id, exc)
+                status = self._statuses.setdefault(config.id, RunnerStatus(bot_id=config.id, mode="long_polling", running=True))
+                status.last_error = str(exc) or exc.__class__.__name__
+                await asyncio.sleep(self._error_sleep_seconds)
             except Exception as exc:  # noqa: BLE001 - polling loop должен переживать transient ошибки Telegram/сети.
                 logger.exception("Ошибка long polling для бота %s", config.id)
                 status = self._statuses.setdefault(config.id, RunnerStatus(bot_id=config.id, mode="long_polling", running=True))
