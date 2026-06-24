@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.queue.delivery import delivery_queue
 from app.services.admin_store import get_admin_bot_config, record_event
+from app.services.idempotency import idempotency_store
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/webhooks/telegram", tags=["telegram-webhooks"])
