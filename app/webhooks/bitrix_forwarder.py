@@ -14,7 +14,9 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from app.queue.delivery import delivery_queue
 from app.services.admin_store import get_admin_bot_config, record_event
+from app.services.idempotency import idempotency_store
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/webhooks/telegram", tags=["telegram-webhooks"])
@@ -168,7 +170,17 @@ async def forward_update(bot_key: str, request: Request, bot: Bot | None = None)
     endpoint = resolve_bitrix_endpoint(bot_key)
     update = await parse_update(request, bot=bot)
     payload = serialize_update(update)
+    duplicate = await idempotency_store.seen_or_mark(bot_key, payload.get("update_id"))
+    if duplicate:
+        record_event("incoming", bot_key, "duplicate", payload)
+        return DeliveryResult(delivered=True, attempts=0)
+
+    queue_item = delivery_queue.enqueue(endpoint, bot_key, payload)
     result = await deliver_to_bitrix(endpoint, payload)
+    if result.delivered:
+        delivery_queue.mark_delivered(queue_item, result.attempts)
+    else:
+        delivery_queue.mark_failed(queue_item, result.attempts, result.error)
     record_event("incoming", bot_key, "delivered" if result.delivered else "error", payload, result.error)
     return result
 
