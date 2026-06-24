@@ -23,6 +23,7 @@ from app.services.admin_store import (
     save_admin_bot_config,
 )
 from app.services.bot_registry import registry
+from app.services.telegram_runner import telegram_runner
 from app.webhooks.bitrix_forwarder import process_delivery_item
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -138,6 +139,7 @@ async def _config_from_form(request: Request, bot_id: str | None = None) -> BotC
         name=str(form.get("name") or "").strip(),
         telegram_bot_token=telegram_bot_token,
         bitrix_webhook_url=str(form.get("bitrix_webhook_url") or "").strip() or None,
+        telegram_update_mode=str(form.get("telegram_update_mode") or "webhook"),
         enabled=form.get("enabled") == "on",
         secret=legacy_secret,
         allowed_ips=str(form.get("allowed_ips") or ""),
@@ -158,6 +160,7 @@ async def create_bot(request: Request) -> HTMLResponse | RedirectResponse:
         config = await _config_from_form(request)
         save_admin_bot_config(config)
         await registry.reload()
+        await telegram_runner.reload()
     except ValidationError as exc:
         return templates.TemplateResponse(request, "bot_form.html", {"bot": None, "errors": exc.errors()}, status_code=400)
     return _redirect_with_message("Бот создан")
@@ -171,6 +174,7 @@ async def update_bot(request: Request, bot_id: str) -> HTMLResponse | RedirectRe
         config = await _config_from_form(request, bot_id=bot_id)
         save_admin_bot_config(config)
         await registry.reload()
+        await telegram_runner.reload()
     except ValidationError as exc:
         return templates.TemplateResponse(request, "bot_form.html", {"bot": get_admin_bot_config(bot_id), "errors": exc.errors()}, status_code=400)
     return _redirect_with_message("Бот обновлен")
@@ -187,6 +191,7 @@ async def toggle_bot(request: Request, bot_id: str) -> RedirectResponse:
     bot.updated_at = datetime.now(timezone.utc)
     save_admin_bot_config(bot)
     await registry.reload()
+    await telegram_runner.reload()
     return _redirect_with_message("Статус бота изменен")
 
 

@@ -186,10 +186,9 @@ async def process_pending_deliveries(limit: int = 50) -> None:
         await process_delivery_item(item.id)
 
 
-async def forward_update(bot_key: str, request: Request, bot: Bot | None = None) -> DeliveryResult:
+async def enqueue_update_payload(bot_key: str, payload: dict[str, Any]) -> DeliveryResult:
+    """Ставит Telegram update payload в outbox с дедупликацией по update_id."""
     endpoint = resolve_bitrix_endpoint(bot_key)
-    update = await parse_update(request, bot=bot)
-    payload = serialize_update(update)
     existing = delivery_queue.find_by_update(bot_key, payload.get("update_id"))
     if existing and existing.status in {"queued", "processing", "delivered"}:
         record_event("incoming", bot_key, "duplicate", payload)
@@ -198,6 +197,16 @@ async def forward_update(bot_key: str, request: Request, bot: Bot | None = None)
     queue_item = delivery_queue.enqueue(endpoint, bot_key, payload)
     record_event("incoming", bot_key, "queued", payload)
     return DeliveryResult(delivered=True, attempts=0, status_code=202, error=queue_item.id)
+
+
+async def enqueue_update(bot_key: str, update: Update) -> DeliveryResult:
+    """Ставит aiogram Update в outbox. Используется webhook и long polling режимами."""
+    return await enqueue_update_payload(bot_key, serialize_update(update))
+
+
+async def forward_update(bot_key: str, request: Request, bot: Bot | None = None) -> DeliveryResult:
+    update = await parse_update(request, bot=bot)
+    return await enqueue_update(bot_key, update)
 
 
 @router.post("/{bot_key}")

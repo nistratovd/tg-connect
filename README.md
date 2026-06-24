@@ -13,6 +13,7 @@ TG Connect — сервис-маршрутизатор между Telegram Bot A
   - `deleteMessage`;
   - `answerCallbackQuery`.
 - Webhook endpoint Telegram → Битрикс: `/webhooks/telegram/{bot_key}`.
+- Режимы получения Telegram updates: `webhook` и `long_polling`.
 - Административная панель для настройки нескольких ботов.
 - Защита запросов от Битрикс:
   - HMAC-подпись;
@@ -233,6 +234,7 @@ export TELEGRAM_BOT_CONFIGS='[
     "name": "support",
     "telegram_bot_token": "123456:ABCDEF",
     "bitrix_webhook_url": "https://bitrix.internal/tg/webhook",
+    "telegram_update_mode": "webhook",
     "enabled": true,
     "hmac_secret": "bitrix-to-tg-secret",
     "allowed_ips": ["10.0.0.0/8"],
@@ -257,6 +259,8 @@ export BITRIX_BOT_WEBHOOK_URLS='{"support":"https://bitrix.internal/tg/webhook"}
 | `BITRIX_FORWARD_TIMEOUT_SECONDS` | `5` | Timeout HTTP-запроса в Битрикс. |
 | `BITRIX_FORWARD_RETRY_ATTEMPTS` | `3` | Количество попыток доставки. |
 | `BITRIX_FORWARD_RETRY_BACKOFF_SECONDS` | `0.5` | Базовая задержка между retry. |
+| `TELEGRAM_LONG_POLL_TIMEOUT_SECONDS` | `30` | Timeout одного `getUpdates` запроса в long polling режиме. |
+| `TELEGRAM_LONG_POLL_ERROR_SLEEP_SECONDS` | `5` | Пауза после ошибки long polling loop. |
 
 ---
 
@@ -297,6 +301,7 @@ export BITRIX_BOT_WEBHOOK_URLS='{"support":"https://bitrix.internal/tg/webhook"}
    - **Название** — понятное имя, например `Support Bot`.
    - **Telegram bot token** — токен от BotFather.
    - **Endpoint Битрикс** — URL, куда TG Connect будет отправлять Telegram updates.
+   - **Режим получения Telegram updates** — `Webhook` для входящих Telegram webhook или `Long polling`, чтобы TG Connect сам забирал updates через `getUpdates`.
    - **Секрет webhook** — legacy secret, если используется.
    - **HMAC secret** — секрет для подписи запросов Битрикс → TG Connect.
    - **Разрешенные IP** — список IP/CIDR, например `10.0.0.0/8, 192.168.1.10`.
@@ -553,6 +558,35 @@ https://tg-connect.example.com/webhooks/telegram/support
 ```
 
 `bot_key` должен совпадать с ID/alias бота в TG Connect или ключом в `BITRIX_BOT_WEBHOOK_URLS`.
+
+
+## Режим long polling
+
+Если Telegram не может отправлять webhook в TG Connect или удобнее, чтобы сервис сам забирал updates, в карточке бота выберите **Long polling**. В этом режиме при старте приложения TG Connect:
+
+1. загружает активные конфигурации ботов;
+2. находит ботов с `telegram_update_mode=long_polling`;
+3. запускает для каждого такого бота background runner;
+4. вызывает Telegram Bot API `getUpdates`;
+5. ставит полученные updates в ту же persistent delivery queue;
+6. доставляет события в Битрикс тем же механизмом, что и webhook-режим.
+
+Для long polling режима не нужно настраивать Telegram `setWebhook`. Если ранее webhook был включен, его рекомендуется удалить:
+
+```bash
+curl -X POST 'https://api.telegram.org/bot123456:ABCDEF/deleteWebhook'
+```
+
+Параметры polling loop настраиваются переменными:
+
+```bash
+export TELEGRAM_LONG_POLL_TIMEOUT_SECONDS=30
+export TELEGRAM_LONG_POLL_ERROR_SLEEP_SECONDS=5
+```
+
+Состояние long polling runners отображается в `/health/ready` и `/metrics`.
+
+---
 
 ## Настройка webhook в Telegram
 
@@ -852,7 +886,6 @@ python -m compileall app
 - Нет полноценной обработки multipart/file upload.
 - Нет RBAC и audit log действий администраторов.
 - Нет встроенной настройки Telegram webhook из админки.
-- Нет long polling runner.
 - Нет Dockerfile и docker-compose в текущей версии проекта.
 
 ---
@@ -867,5 +900,6 @@ python -m compileall app
 6. Поддержка файлов и multipart upload.
 7. RBAC для админки.
 8. Audit log.
-9. Dockerfile, docker-compose и deployment docs.
+9. Более подробный admin UI статусов long polling runners.
+10. Dockerfile, docker-compose и deployment docs.
 10. CI pipeline с tests/lint/type-check.
