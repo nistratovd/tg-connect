@@ -14,11 +14,16 @@ class FakeBot:
     def __init__(self, updates):
         self.updates = updates
         self.calls = []
+        self.delete_webhook_calls = []
 
     async def get_updates(self, *, offset=None, timeout=None, request_timeout=None):
         self.calls.append({"offset": offset, "timeout": timeout, "request_timeout": request_timeout})
         updates, self.updates = self.updates, []
         return updates
+
+    async def delete_webhook(self, *, drop_pending_updates=False):
+        self.delete_webhook_calls.append({"drop_pending_updates": drop_pending_updates})
+        return True
 
 
 class FakeAsyncClient:
@@ -94,3 +99,34 @@ def test_polling_request_timeout_is_above_long_poll_timeout(monkeypatch):
 
     assert runner._poll_timeout_seconds == 30
     assert runner._request_timeout_seconds == 40
+
+
+def test_delete_webhook_before_long_polling_is_enabled_by_default():
+    bot = FakeBot([])
+    runner = TelegramLongPollingRunner(BotRegistry(config_loader=lambda: []))
+    config = BotConfig(id="poll", name="poll", telegram_bot_token="123:abc", telegram_update_mode="long_polling")
+
+    asyncio.run(runner.delete_webhook_if_needed(config, bot))
+
+    assert bot.delete_webhook_calls == [{"drop_pending_updates": False}]
+
+
+def test_delete_webhook_can_drop_pending_updates(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_LONG_POLL_DROP_PENDING_UPDATES", "true")
+    bot = FakeBot([])
+    runner = TelegramLongPollingRunner(BotRegistry(config_loader=lambda: []))
+    config = BotConfig(id="poll", name="poll", telegram_bot_token="123:abc", telegram_update_mode="long_polling")
+
+    asyncio.run(runner.delete_webhook_if_needed(config, bot))
+
+    assert bot.delete_webhook_calls == [{"drop_pending_updates": True}]
+
+
+def test_delete_webhook_can_be_disabled():
+    bot = FakeBot([])
+    runner = TelegramLongPollingRunner(BotRegistry(config_loader=lambda: []), delete_webhook_on_start=False)
+    config = BotConfig(id="poll", name="poll", telegram_bot_token="123:abc", telegram_update_mode="long_polling")
+
+    asyncio.run(runner.delete_webhook_if_needed(config, bot))
+
+    assert bot.delete_webhook_calls == []

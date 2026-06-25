@@ -8,7 +8,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 
 from aiogram import Bot
-from aiogram.exceptions import TelegramNetworkError
+from aiogram.exceptions import TelegramConflictError, TelegramNetworkError
 from aiogram.types import Update
 
 from app.models.bot_config import BotConfig
@@ -42,6 +42,8 @@ class TelegramLongPollingRunner:
         poll_timeout_seconds: int | None = None,
         request_timeout_seconds: int | None = None,
         error_sleep_seconds: float | None = None,
+        delete_webhook_on_start: bool | None = None,
+        drop_pending_updates_on_delete: bool | None = None,
     ) -> None:
         self._registry = bot_registry
         self._update_handler = update_handler
@@ -60,6 +62,18 @@ class TelegramLongPollingRunner:
             )
             self._request_timeout_seconds = self._poll_timeout_seconds + 10
         self._error_sleep_seconds = error_sleep_seconds or float(os.getenv("TELEGRAM_LONG_POLL_ERROR_SLEEP_SECONDS", "5"))
+        self._delete_webhook_on_start = (
+            delete_webhook_on_start
+            if delete_webhook_on_start is not None
+            else os.getenv("TELEGRAM_LONG_POLL_DELETE_WEBHOOK", "true").strip().lower()
+            in {"1", "true", "yes", "on", "да"}
+        )
+        self._drop_pending_updates_on_delete = (
+            drop_pending_updates_on_delete
+            if drop_pending_updates_on_delete is not None
+            else os.getenv("TELEGRAM_LONG_POLL_DROP_PENDING_UPDATES", "false").strip().lower()
+            in {"1", "true", "yes", "on", "да"}
+        )
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._statuses: dict[str, RunnerStatus] = {}
         self._stopping = asyncio.Event()
@@ -115,13 +129,32 @@ class TelegramLongPollingRunner:
             status.last_error = None
         return next_offset
 
+    async def delete_webhook_if_needed(self, config: BotConfig, bot: Bot) -> None:
+        """Удаляет активный Telegram webhook перед long polling, если это включено настройкой."""
+        if not self._delete_webhook_on_start:
+            return
+        try:
+            await bot.delete_webhook(drop_pending_updates=self._drop_pending_updates_on_delete)
+            logger.info("Telegram webhook удален перед long polling для бота %s", config.id)
+        except Exception as exc:  # noqa: BLE001 - polling loop должен переживать transient ошибки Telegram/сети.
+            logger.warning("Не удалось удалить Telegram webhook перед long polling для бота %s: %s", config.id, exc)
+            status = self._statuses.setdefault(config.id, RunnerStatus(bot_id=config.id, mode="long_polling", running=True))
+            status.last_error = str(exc) or exc.__class__.__name__
+
     async def _poll_loop(self, config: BotConfig, bot: Bot) -> None:
         offset: int | None = None
+        await self.delete_webhook_if_needed(config, bot)
         while not self._stopping.is_set():
             try:
                 offset = await self.poll_once(config, bot, offset)
             except asyncio.CancelledError:
                 raise
+            except TelegramConflictError as exc:
+                logger.warning("Telegram webhook активен для бота %s, getUpdates конфликтует с webhook: %s", config.id, exc)
+                status = self._statuses.setdefault(config.id, RunnerStatus(bot_id=config.id, mode="long_polling", running=True))
+                status.last_error = str(exc) or exc.__class__.__name__
+                await self.delete_webhook_if_needed(config, bot)
+                await asyncio.sleep(self._error_sleep_seconds)
             except TelegramNetworkError as exc:
                 logger.warning("Сетевая ошибка long polling для бота %s: %s", config.id, exc)
                 status = self._statuses.setdefault(config.id, RunnerStatus(bot_id=config.id, mode="long_polling", running=True))
