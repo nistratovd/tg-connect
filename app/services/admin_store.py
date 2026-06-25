@@ -15,6 +15,7 @@ from pydantic import TypeAdapter, ValidationError
 from app.models.bot_config import BotConfig
 from app.security.secrets import encrypt_config_payload
 from app.security_utils import mask_sensitive
+from app.services.wireguard import wireguard_manager
 
 DEFAULT_ADMIN_STATE_PATH = "data/admin_state.json"
 _MAX_EVENTS = 100
@@ -99,6 +100,7 @@ def recent_events(limit: int = 50) -> list[dict[str, Any]]:
 
 
 async def check_telegram(token: str) -> tuple[bool, str]:
+    await wireguard_manager.ensure_started()
     bot = Bot(token)
     try:
         me = await bot.get_me()

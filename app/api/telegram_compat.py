@@ -13,6 +13,7 @@ from app.models.bot_config import BotConfig
 from app.security_utils import mask_sensitive
 from app.services.admin_store import record_event
 from app.services.bot_registry import BotRegistryError, registry
+from app.services.wireguard import wireguard_manager
 
 router = APIRouter()
 
@@ -97,6 +98,7 @@ def _dynamic_bot(token: str) -> Bot:
 
 
 async def get_bot(token_or_id_or_alias: str) -> Bot:
+    await wireguard_manager.ensure_started()
     try:
         await registry.load_active_bots()
     except BotRegistryError as exc:
