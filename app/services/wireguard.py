@@ -23,6 +23,7 @@ class WireGuardSettings:
     route_allowed_ips: bool = True
     command_timeout_seconds: float = 15.0
     extra_routes: tuple[str, ...] = field(default_factory=tuple)
+    strict_startup: bool = False
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -49,6 +50,7 @@ def load_wireguard_settings() -> WireGuardSettings:
         route_allowed_ips=_env_bool("TELEGRAM_WIREGUARD_ROUTE_ALLOWED_IPS", True),
         command_timeout_seconds=float(os.getenv("TELEGRAM_WIREGUARD_COMMAND_TIMEOUT_SECONDS", "15")),
         extra_routes=_env_csv("TELEGRAM_WIREGUARD_EXTRA_ROUTES", ()),
+        strict_startup=_env_bool("TELEGRAM_WIREGUARD_STRICT_STARTUP"),
     )
 
 
@@ -62,6 +64,7 @@ class WireGuardManager:
     def __init__(self, settings_loader=load_wireguard_settings) -> None:
         self._settings_loader = settings_loader
         self._started = False
+        self._failed = False
         self._lock = asyncio.Lock()
 
     async def ensure_started(self) -> None:
@@ -69,13 +72,25 @@ class WireGuardManager:
         if not settings.enabled:
             return
         async with self._lock:
-            if self._started:
+            if self._started or self._failed:
                 return
-            if settings.auto_up:
-                await self._run(("wg-quick", "up", settings.config_path or settings.interface), settings)
-            if settings.route_allowed_ips:
-                for network in await self._telegram_networks(settings):
-                    await self._run(("ip", "route", "replace", network, "dev", settings.interface), settings)
+            try:
+                if settings.auto_up:
+                    await self._run(("wg-quick", "up", settings.config_path or settings.interface), settings)
+                if settings.route_allowed_ips:
+                    for network in await self._telegram_networks(settings):
+                        await self._run(("ip", "route", "replace", network, "dev", settings.interface), settings)
+            except Exception as exc:  # noqa: BLE001 - VPN не должен валить весь сервис по умолчанию.
+                self._failed = True
+                logger.error(
+                    "Не удалось включить WireGuard-маршрутизацию Telegram API: %s. "
+                    "Приложение продолжит запуск без VPN для Telegram. "
+                    "Проверьте права systemd-сервиса или поднимите WireGuard отдельно и отключите TELEGRAM_WIREGUARD_AUTO_UP.",
+                    exc,
+                )
+                if settings.strict_startup:
+                    raise
+                return
             self._started = True
             logger.info("WireGuard-маршрутизация Telegram API включена через интерфейс %s", settings.interface)
 
@@ -86,6 +101,7 @@ class WireGuardManager:
         async with self._lock:
             await self._run(("wg-quick", "down", settings.config_path or settings.interface), settings, check=False)
             self._started = False
+            self._failed = False
 
     async def _telegram_networks(self, settings: WireGuardSettings) -> list[str]:
         networks = list(settings.extra_routes)
