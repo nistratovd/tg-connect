@@ -262,6 +262,34 @@ export BITRIX_BOT_WEBHOOK_URLS='{"support":"https://bitrix.internal/tg/webhook"}
 | `TELEGRAM_LONG_POLL_TIMEOUT_SECONDS` | `30` | Timeout одного `getUpdates` запроса в long polling режиме. |
 | `TELEGRAM_LONG_POLL_ERROR_SLEEP_SECONDS` | `5` | Пауза после ошибки long polling loop. |
 
+### WireGuard только для Telegram API
+
+TG Connect может поднять WireGuard-интерфейс и добавить host routes только до Telegram API. Запросы в Битрикс этим механизмом не изменяются и продолжают идти через обычную сетевую маршрутизацию ОС. Важно: не используйте в WireGuard `AllowedIPs = 0.0.0.0/0, ::/0` без отдельной policy routing-настройки, иначе весь исходящий трафик, включая Битрикс, уйдет в VPN.
+
+| Переменная | Значение по умолчанию | Назначение |
+|---|---:|---|
+| `TELEGRAM_WIREGUARD_ENABLED` | `false` | Включить WireGuard-маршрутизацию для Telegram API. |
+| `TELEGRAM_WIREGUARD_INTERFACE` | `wg0` | Имя WireGuard-интерфейса для маршрутов Telegram. |
+| `TELEGRAM_WIREGUARD_CONFIG_PATH` | — | Путь к конфигу `wg-quick`; если не задан, используется имя интерфейса. |
+| `TELEGRAM_WIREGUARD_AUTO_UP` | `false` | Выполнять `wg-quick up/down` при старте/остановке приложения. |
+| `TELEGRAM_WIREGUARD_ROUTE_ALLOWED_IPS` | `true` | Добавлять маршруты до IP-адресов Telegram API через WireGuard-интерфейс. |
+| `TELEGRAM_WIREGUARD_TELEGRAM_HOSTS` | `api.telegram.org` | Список хостов Telegram API для DNS-resolve и host routes. |
+| `TELEGRAM_WIREGUARD_EXTRA_ROUTES` | — | Дополнительные CIDR-маршруты Telegram, например `149.154.160.0/20,91.108.4.0/22`. |
+| `TELEGRAM_WIREGUARD_COMMAND_TIMEOUT_SECONDS` | `15` | Timeout выполнения `wg-quick`/`ip route`. |
+| `TELEGRAM_WIREGUARD_STRICT_STARTUP` | `false` | Если `true`, ошибка WireGuard останавливает приложение; по умолчанию ошибка только логируется. |
+
+Пример:
+
+```bash
+export TELEGRAM_WIREGUARD_ENABLED=true
+export TELEGRAM_WIREGUARD_INTERFACE=wg-tg
+export TELEGRAM_WIREGUARD_CONFIG_PATH=/etc/wireguard/wg-tg.conf
+export TELEGRAM_WIREGUARD_AUTO_UP=false  # рекомендуется: поднимать wg-tg через systemd/root заранее
+export TELEGRAM_WIREGUARD_EXTRA_ROUTES=149.154.160.0/20,91.108.4.0/22
+```
+
+Если сервис запущен от пользователя `tg-connect`, не добавляйте `sudo` в `PreUp`/`PostUp` WireGuard-конфига и не рассчитывайте на ввод пароля: systemd-сервис работает без TTY. Рекомендуемый вариант — поднять интерфейс отдельно от root (`systemctl enable --now wg-quick@wg-tg`) и оставить в приложении `TELEGRAM_WIREGUARD_AUTO_UP=false`; тогда TG Connect будет только добавлять маршруты Telegram, либо можно заранее настроить маршруты в `wg-quick` и выставить `TELEGRAM_WIREGUARD_ROUTE_ALLOWED_IPS=false`.
+
 ---
 
 ## Административная часть
