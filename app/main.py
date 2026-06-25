@@ -8,18 +8,21 @@ from app.api.telegram_compat import router as telegram_compat_router
 from app.middleware.security import SecurityMiddleware
 from app.observability.routes import router as observability_router
 from app.services.telegram_runner import telegram_runner
+from app.services.wireguard import wireguard_manager
 from app.webhooks.bitrix_forwarder import process_pending_deliveries, router as bitrix_forwarder_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: ARG001 - FastAPI передает приложение в lifespan.
     """Восстанавливает outbox и запускает long polling runners для настроенных ботов."""
+    await wireguard_manager.ensure_started()
     await process_pending_deliveries()
     await telegram_runner.start()
     try:
         yield
     finally:
         await telegram_runner.stop()
+        await wireguard_manager.stop()
 
 
 app = FastAPI(title="TG Connect", lifespan=lifespan)
