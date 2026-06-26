@@ -34,6 +34,13 @@ class FakeBot:
         self.calls.append(("answer_callback_query", params))
         return True
 
+    def __getattr__(self, name: str):
+        async def method(**params):
+            self.calls.append((name, params))
+            return {"method": name, "params": params}
+
+        return method
+
 
 @pytest.fixture(autouse=True)
 def fake_bot_factory(monkeypatch):
@@ -85,10 +92,10 @@ def test_validates_required_params(client):
 
 
 def test_rejects_unsupported_method(client):
-    response = client.post("/bottoken/forwardMessage", json={"chat_id": 100})
+    response = client.post("/bottoken/unsupportedMethod", json={"chat_id": 100})
 
     assert response.status_code == 404
-    assert response.json() == {"ok": False, "description": "Method forwardMessage is not supported"}
+    assert response.json() == {"ok": False, "description": "Method unsupportedMethod is not supported"}
 
 
 def test_edit_message_text_requires_target(client):
@@ -115,6 +122,52 @@ def test_supported_methods(client, fake_bot_factory, method, payload, expected_c
     assert response.status_code == 200
     assert response.json()["ok"] is True
     assert fake_bot_factory["token"].calls[-1] == (expected_call, payload)
+
+
+@pytest.mark.parametrize(
+    ("method", "payload", "expected_call"),
+    [
+        ("forwardMessage", {"chat_id": 1, "from_chat_id": 2, "message_id": 3}, "forward_message"),
+        ("copyMessage", {"chat_id": 1, "from_chat_id": 2, "message_id": 3}, "copy_message"),
+        ("sendMediaGroup", {"chat_id": 1, "media": [{"type": "photo", "media": "file_id"}]}, "send_media_group"),
+        ("sendVideo", {"chat_id": 1, "video": "file_id"}, "send_video"),
+        ("sendAudio", {"chat_id": 1, "audio": "file_id"}, "send_audio"),
+        ("sendVoice", {"chat_id": 1, "voice": "file_id"}, "send_voice"),
+        ("sendAnimation", {"chat_id": 1, "animation": "file_id"}, "send_animation"),
+        ("sendLocation", {"chat_id": 1, "latitude": 55.75, "longitude": 37.62}, "send_location"),
+        ("sendContact", {"chat_id": 1, "phone_number": "+100", "first_name": "Test"}, "send_contact"),
+        ("sendPoll", {"chat_id": 1, "question": "Q?", "options": ["A", "B"]}, "send_poll"),
+        ("pinChatMessage", {"chat_id": 1, "message_id": 3}, "pin_chat_message"),
+        ("unpinChatMessage", {"chat_id": 1}, "unpin_chat_message"),
+        ("setMessageReaction", {"chat_id": 1, "message_id": 3}, "set_message_reaction"),
+        ("getChat", {"chat_id": 1}, "get_chat"),
+        ("getChatMember", {"chat_id": 1, "user_id": 7}, "get_chat_member"),
+        ("getFile", {"file_id": "abc"}, "get_file"),
+        ("setWebhook", {"url": "https://example.com/hook"}, "set_webhook"),
+        ("deleteWebhook", {}, "delete_webhook"),
+        ("getWebhookInfo", {}, "get_webhook_info"),
+    ],
+)
+def test_requested_telegram_methods(client, fake_bot_factory, method, payload, expected_call):
+    response = client.post(f"/bottoken/{method}", json=payload)
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+    assert fake_bot_factory["token"].calls[-1] == (expected_call, payload)
+
+
+def test_json_encoded_form_fields_are_parsed(client, fake_bot_factory):
+    response = client.post(
+        "/bottoken/sendPoll",
+        data={"chat_id": "1", "question": "Q?", "options": '["A", "B"]'},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+    assert fake_bot_factory["token"].calls[-1] == (
+        "send_poll",
+        {"chat_id": "1", "question": "Q?", "options": ["A", "B"]},
+    )
 
 
 def _signed_headers(secret: str, body: bytes, timestamp: int | None = None) -> dict[str, str]:
