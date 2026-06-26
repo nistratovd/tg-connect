@@ -7,7 +7,7 @@ from typing import Any
 from aiogram import Bot
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 from app.models.bot_config import BotConfig
 from app.security_utils import mask_sensitive
@@ -31,6 +31,36 @@ class TelegramCompatError(Exception):
 class TelegramMethodParams(BaseModel):
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
+    @model_validator(mode="before")
+    @classmethod
+    def parse_json_encoded_fields(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+
+        import json
+
+        json_fields = {
+            "allowed_updates",
+            "caption_entities",
+            "country_codes",
+            "correct_option_ids",
+            "explanation_entities",
+            "media",
+            "options",
+            "question_entities",
+            "reaction",
+        }
+        parsed = dict(data)
+        for field in json_fields:
+            value = parsed.get(field)
+            if isinstance(value, str) and value and value[0] in "[{":
+                try:
+                    parsed[field] = json.loads(value)
+                except json.JSONDecodeError:
+                    # Оставляем исходное значение: Pydantic вернет понятную ошибку для поля.
+                    pass
+        return parsed
+
 
 class SendMessageParams(TelegramMethodParams):
     chat_id: int | str
@@ -45,6 +75,98 @@ class SendPhotoParams(TelegramMethodParams):
 class SendDocumentParams(TelegramMethodParams):
     chat_id: int | str
     document: str
+
+
+class ForwardMessageParams(TelegramMethodParams):
+    chat_id: int | str
+    from_chat_id: int | str
+    message_id: int
+
+
+class CopyMessageParams(ForwardMessageParams):
+    pass
+
+
+class SendMediaGroupParams(TelegramMethodParams):
+    chat_id: int | str
+    media: list[Any]
+
+
+class SendVideoParams(TelegramMethodParams):
+    chat_id: int | str
+    video: str
+
+
+class SendAudioParams(TelegramMethodParams):
+    chat_id: int | str
+    audio: str
+
+
+class SendVoiceParams(TelegramMethodParams):
+    chat_id: int | str
+    voice: str
+
+
+class SendAnimationParams(TelegramMethodParams):
+    chat_id: int | str
+    animation: str
+
+
+class SendLocationParams(TelegramMethodParams):
+    chat_id: int | str
+    latitude: float
+    longitude: float
+
+
+class SendContactParams(TelegramMethodParams):
+    chat_id: int | str
+    phone_number: str
+    first_name: str
+
+
+class SendPollParams(TelegramMethodParams):
+    chat_id: int | str
+    question: str
+    options: list[Any]
+
+
+class PinChatMessageParams(TelegramMethodParams):
+    chat_id: int | str
+    message_id: int
+
+
+class UnpinChatMessageParams(TelegramMethodParams):
+    chat_id: int | str
+
+
+class SetMessageReactionParams(TelegramMethodParams):
+    chat_id: int | str
+    message_id: int
+
+
+class GetChatParams(TelegramMethodParams):
+    chat_id: int | str
+
+
+class GetChatMemberParams(TelegramMethodParams):
+    chat_id: int | str
+    user_id: int
+
+
+class GetFileParams(TelegramMethodParams):
+    file_id: str
+
+
+class SetWebhookParams(TelegramMethodParams):
+    url: str
+
+
+class DeleteWebhookParams(TelegramMethodParams):
+    pass
+
+
+class GetWebhookInfoParams(TelegramMethodParams):
+    pass
 
 
 class EditMessageTextParams(TelegramMethodParams):
@@ -67,6 +189,25 @@ _METHODS: dict[str, tuple[type[TelegramMethodParams], str]] = {
     "sendMessage": (SendMessageParams, "send_message"),
     "sendPhoto": (SendPhotoParams, "send_photo"),
     "sendDocument": (SendDocumentParams, "send_document"),
+    "forwardMessage": (ForwardMessageParams, "forward_message"),
+    "copyMessage": (CopyMessageParams, "copy_message"),
+    "sendMediaGroup": (SendMediaGroupParams, "send_media_group"),
+    "sendVideo": (SendVideoParams, "send_video"),
+    "sendAudio": (SendAudioParams, "send_audio"),
+    "sendVoice": (SendVoiceParams, "send_voice"),
+    "sendAnimation": (SendAnimationParams, "send_animation"),
+    "sendLocation": (SendLocationParams, "send_location"),
+    "sendContact": (SendContactParams, "send_contact"),
+    "sendPoll": (SendPollParams, "send_poll"),
+    "pinChatMessage": (PinChatMessageParams, "pin_chat_message"),
+    "unpinChatMessage": (UnpinChatMessageParams, "unpin_chat_message"),
+    "setMessageReaction": (SetMessageReactionParams, "set_message_reaction"),
+    "getChat": (GetChatParams, "get_chat"),
+    "getChatMember": (GetChatMemberParams, "get_chat_member"),
+    "getFile": (GetFileParams, "get_file"),
+    "setWebhook": (SetWebhookParams, "set_webhook"),
+    "deleteWebhook": (DeleteWebhookParams, "delete_webhook"),
+    "getWebhookInfo": (GetWebhookInfoParams, "get_webhook_info"),
     "editMessageText": (EditMessageTextParams, "edit_message_text"),
     "deleteMessage": (DeleteMessageParams, "delete_message"),
     "answerCallbackQuery": (AnswerCallbackQueryParams, "answer_callback_query"),

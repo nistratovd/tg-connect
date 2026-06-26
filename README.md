@@ -5,13 +5,13 @@ TG Connect — сервис-маршрутизатор между Telegram Bot A
 ## Возможности текущей версии
 
 - Telegram-compatible HTTP API вида `/bot{token_or_alias}/{method}`.
-- Поддержка базовых Telegram Bot API методов:
-  - `sendMessage`;
-  - `sendPhoto`;
-  - `sendDocument`;
-  - `editMessageText`;
-  - `deleteMessage`;
-  - `answerCallbackQuery`.
+- Поддержка Telegram-compatible методов для отправки, пересылки, управления сообщениями, чатами, файлами и webhook:
+  - сообщения и медиа: `sendMessage`, `sendPhoto`, `sendDocument`, `sendVideo`, `sendAudio`, `sendVoice`, `sendAnimation`, `sendMediaGroup`;
+  - пересылка/копирование: `forwardMessage`, `copyMessage`;
+  - геоданные, контакты и опросы: `sendLocation`, `sendContact`, `sendPoll`;
+  - управление сообщениями: `editMessageText`, `deleteMessage`, `pinChatMessage`, `unpinChatMessage`, `setMessageReaction`, `answerCallbackQuery`;
+  - чаты и файлы: `getChat`, `getChatMember`, `getFile`;
+  - webhook: `setWebhook`, `deleteWebhook`, `getWebhookInfo`.
 - Webhook endpoint Telegram → Битрикс: `/webhooks/telegram/{bot_key}`.
 - Режимы получения Telegram updates: `webhook` и `long_polling`.
 - Административная панель для настройки нескольких ботов.
@@ -454,6 +454,19 @@ POST https://<host>/bot{bot_key_or_token}/{method}
 - `{bot_key_or_token}` — внутренний ID/alias бота или прямой Telegram token;
 - `{method}` — поддерживаемый Telegram Bot API метод.
 
+Поддерживаемые методы:
+
+| Группа | Методы |
+|---|---|
+| Отправка сообщений и медиа | `sendMessage`, `sendPhoto`, `sendDocument`, `sendVideo`, `sendAudio`, `sendVoice`, `sendAnimation`, `sendMediaGroup` |
+| Пересылка и копирование | `forwardMessage`, `copyMessage` |
+| Геоданные, контакты и опросы | `sendLocation`, `sendContact`, `sendPoll` |
+| Управление сообщениями | `editMessageText`, `deleteMessage`, `pinChatMessage`, `unpinChatMessage`, `setMessageReaction`, `answerCallbackQuery` |
+| Чаты и файлы | `getChat`, `getChatMember`, `getFile` |
+| Webhook | `setWebhook`, `deleteWebhook`, `getWebhookInfo` |
+
+Параметры передаются в формате Telegram Bot API. Помимо `application/json`, сервис принимает form-encoded запросы; поля-массивы/объекты (`media`, `options`, `reaction`, `allowed_updates` и другие entity-списки) можно передавать JSON-строкой.
+
 Рекомендуется использовать внутренний `bot_key`, например:
 
 ```text
@@ -525,6 +538,66 @@ curl -X POST 'https://tg-connect.example.com/botsupport/answerCallbackQuery' \
   -d '{
     "callback_query_id": "1234567890",
     "text": "Принято"
+  }'
+```
+
+## Пример forwardMessage
+
+```bash
+curl -X POST 'https://tg-connect.example.com/botsupport/forwardMessage' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "chat_id": 123456789,
+    "from_chat_id": 987654321,
+    "message_id": 42
+  }'
+```
+
+## Пример sendMediaGroup
+
+```bash
+curl -X POST 'https://tg-connect.example.com/botsupport/sendMediaGroup' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "chat_id": 123456789,
+    "media": [
+      {"type": "photo", "media": "file_id_1", "caption": "Первое фото"},
+      {"type": "photo", "media": "file_id_2"}
+    ]
+  }'
+```
+
+## Пример sendPoll
+
+```bash
+curl -X POST 'https://tg-connect.example.com/botsupport/sendPoll' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "chat_id": 123456789,
+    "question": "Какой канал связи использовать?",
+    "options": ["Telegram", "Телефон", "Email"]
+  }'
+```
+
+## Пример getFile
+
+```bash
+curl -X POST 'https://tg-connect.example.com/botsupport/getFile' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "file_id": "BQACAgIAAxkBAAIB..."
+  }'
+```
+
+## Пример setWebhook
+
+```bash
+curl -X POST 'https://tg-connect.example.com/botsupport/setWebhook' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "url": "https://tg-connect.example.com/webhooks/telegram/support",
+    "allowed_updates": ["message", "callback_query"],
+    "drop_pending_updates": true
   }'
 ```
 
