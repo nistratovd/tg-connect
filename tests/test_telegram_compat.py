@@ -1,3 +1,5 @@
+from io import BytesIO
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -9,6 +11,7 @@ class FakeBot:
     def __init__(self, token: str) -> None:
         self.token = token
         self.calls = []
+        self.files = {"photos/file_0.jpg": b"fake-jpeg"}
 
     async def send_message(self, **params):
         self.calls.append(("send_message", params))
@@ -33,6 +36,15 @@ class FakeBot:
     async def answer_callback_query(self, **params):
         self.calls.append(("answer_callback_query", params))
         return True
+
+    async def download_file(self, file_path: str, destination=None, **params):
+        self.calls.append(("download_file", {"file_path": file_path, **params}))
+        data = self.files[file_path]
+        if destination is None:
+            return BytesIO(data)
+        destination.write(data)
+        destination.seek(0)
+        return destination
 
     def __getattr__(self, name: str):
         async def method(**params):
@@ -168,6 +180,26 @@ def test_json_encoded_form_fields_are_parsed(client, fake_bot_factory):
         "send_poll",
         {"chat_id": "1", "question": "Q?", "options": ["A", "B"]},
     )
+
+
+def test_download_file_by_alias(client, fake_bot_factory):
+    response = client.get("/file/botinternal/photos/file_0.jpg")
+
+    assert response.status_code == 200
+    assert response.content == b"fake-jpeg"
+    assert response.headers["content-type"] == "image/jpeg"
+    assert 'filename="file_0.jpg"' in response.headers["content-disposition"]
+    assert fake_bot_factory["123:abc"].calls[-1] == (
+        "download_file",
+        {"file_path": "photos/file_0.jpg"},
+    )
+
+
+def test_download_file_returns_telegram_error_on_failure(client):
+    response = client.get("/file/bottoken/photos/missing.jpg")
+
+    assert response.status_code == 500
+    assert response.json() == {"ok": False, "description": "Internal server error"}
 
 
 def _signed_headers(secret: str, body: bytes, timestamp: int | None = None) -> dict[str, str]:

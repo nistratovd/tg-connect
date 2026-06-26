@@ -5,6 +5,7 @@ TG Connect — сервис-маршрутизатор между Telegram Bot A
 ## Возможности текущей версии
 
 - Telegram-compatible HTTP API вида `/bot{token_or_alias}/{method}`.
+- Telegram-compatible file proxy вида `/file/bot{token_or_alias}/{file_path}` для скачивания файлов Telegram через TG Connect.
 - Поддержка Telegram-compatible методов для отправки, пересылки, управления сообщениями, чатами, файлами и webhook:
   - сообщения и медиа: `sendMessage`, `sendPhoto`, `sendDocument`, `sendVideo`, `sendAudio`, `sendVoice`, `sendAnimation`, `sendMediaGroup`;
   - пересылка/копирование: `forwardMessage`, `copyMessage`;
@@ -579,7 +580,9 @@ curl -X POST 'https://tg-connect.example.com/botsupport/sendPoll' \
   }'
 ```
 
-## Пример getFile
+## Пример getFile и скачивания файла
+
+Сначала Битрикс запрашивает у Telegram metadata файла по `file_id` через метод `getFile`:
 
 ```bash
 curl -X POST 'https://tg-connect.example.com/botsupport/getFile' \
@@ -588,6 +591,37 @@ curl -X POST 'https://tg-connect.example.com/botsupport/getFile' \
     "file_id": "BQACAgIAAxkBAAIB..."
   }'
 ```
+
+В успешном ответе Telegram вернет `file_path`, например:
+
+```json
+{
+  "ok": true,
+  "result": {
+    "file_id": "BQACAgIAAxkBAAIB...",
+    "file_unique_id": "AQAD...",
+    "file_size": 12345,
+    "file_path": "photos/file_0.jpg"
+  }
+}
+```
+
+Затем Битрикс скачивает сам файл через TG Connect, не обращаясь напрямую к Telegram:
+
+```bash
+curl -L 'https://tg-connect.example.com/file/botsupport/photos/file_0.jpg' \
+  --output file_0.jpg
+```
+
+Формат URL:
+
+```text
+GET https://<host>/file/bot{bot_key_or_token}/{file_path}
+```
+
+Где `{file_path}` — значение из ответа `getFile`, например `photos/file_0.jpg`, `documents/file_12.pdf` или другой путь Telegram. TG Connect скачивает файл через настроенного бота и отдает содержимое Битриксу с `Content-Type`, определенным по расширению файла, и `Content-Disposition` с именем файла. Если для доступа к Telegram API включен WireGuard, этот запрос также идет через тот же сетевой контур сервиса, поэтому TG Connect может выступать туннелем для Битрикс.
+
+Рекомендуется использовать alias/ID бота (`botsupport`), а не прямой Telegram token в URL, чтобы token не попадал в логи reverse proxy и историю запросов.
 
 ## Пример setWebhook
 
@@ -1014,7 +1048,7 @@ python -m compileall app
 - Rate limit хранится в памяти процесса.
 - Административные настройки по умолчанию хранятся в JSON-файле.
 - Telegram Bot API совместимость покрывает только базовые методы.
-- Нет полноценной обработки multipart/file upload.
+- Нет полноценной обработки multipart/file upload для загрузки локальных файлов в Telegram; скачивание файлов Telegram через `/file/bot{token_or_alias}/{file_path}` поддерживается.
 - Нет RBAC и audit log действий администраторов.
 - Нет встроенной настройки Telegram webhook из админки.
 - Нет Dockerfile и docker-compose в текущей версии проекта.
@@ -1028,7 +1062,7 @@ python -m compileall app
 3. Расширенные retry policy с delayed retry, jitter и circuit breaker.
 4. Улучшенный admin UI для фильтрации delivery queue/dead-letter и просмотра payload.
 5. Расширение Telegram Bot API compatibility.
-6. Поддержка файлов и multipart upload.
+6. Поддержка multipart upload для отправки локальных файлов в Telegram.
 7. RBAC для админки.
 8. Audit log.
 9. Более подробный admin UI статусов long polling runners.
