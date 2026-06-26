@@ -6,6 +6,7 @@
 <label>Название <input name="name" value="{{ bot.name if bot else '' }}" required></label>
 <label>Telegram bot token <input name="telegram_bot_token" value="{{ bot.masked_telegram_bot_token if bot else '' }}" required></label>
 <label>Endpoint Битрикс <input name="bitrix_webhook_url" value="{{ bot.bitrix_webhook_url if bot and bot.bitrix_webhook_url else '' }}" placeholder="https://example.bitrix24.ru/rest/..."></label>
+<label>Токен для Битрикс <input name="bitrix_auth_token" value="{{ bot.masked_bitrix_auth_token if bot else '' }}" placeholder="Оставьте пустым для автогенерации"><small>Передается в Битрикс в заголовке X-TG-Connect-Token.</small></label>
 <label>Режим получения Telegram updates <select name="telegram_update_mode"><option value="webhook" {% if not bot or bot.telegram_update_mode == 'webhook' %}selected{% endif %}>Webhook</option><option value="long_polling" {% if bot and bot.telegram_update_mode == 'long_polling' %}selected{% endif %}>Long polling</option></select></label>
 <label>Секрет webhook <input name="secret" value="{{ '***' if bot and bot.secret else '' }}"></label>
 <label>HMAC secret <input name="hmac_secret" value="{{ '***' if bot and bot.hmac_secret else '' }}" placeholder="Если заполнен, требуется подпись запроса"></label>

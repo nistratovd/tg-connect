@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.queue.delivery import delivery_queue
-from app.services.admin_store import get_admin_bot_config, record_event
+from app.services.admin_store import get_admin_bot_config, load_admin_bot_configs, record_event
 from app.services.idempotency import idempotency_store
 
 logger = logging.getLogger(__name__)
@@ -128,7 +128,28 @@ async def parse_update(request: Request, bot: Bot | None = None) -> Update:
         raise BitrixForwarderError("Invalid Telegram update payload") from exc
 
 
-async def deliver_to_bitrix(endpoint: str, payload: dict[str, Any], settings: ForwarderSettings | None = None) -> DeliveryResult:
+def resolve_bitrix_auth_headers(bot_key: str) -> dict[str, str]:
+    """Возвращает заголовки аутентификации для доставки в Битрикс."""
+    configs = load_admin_bot_configs()
+    config = next(
+        (
+            item
+            for item in configs
+            if bot_key in {item.id, item.name, item.telegram_bot_token}
+        ),
+        None,
+    )
+    if config is None or not config.bitrix_auth_token:
+        return {}
+    return {"X-TG-Connect-Token": config.bitrix_auth_token}
+
+
+async def deliver_to_bitrix(
+    endpoint: str,
+    payload: dict[str, Any],
+    settings: ForwarderSettings | None = None,
+    headers: Mapping[str, str] | None = None,
+) -> DeliveryResult:
     settings = settings or get_forwarder_settings()
     last_error: str | None = None
     last_status_code: int | None = None
@@ -136,7 +157,10 @@ async def deliver_to_bitrix(endpoint: str, payload: dict[str, Any], settings: Fo
     async with _DELIVERY_CLIENT_FACTORY() as client:
         for attempt in range(1, settings.retry_attempts + 1):
             try:
-                response = await client.post(endpoint, json=payload, timeout=settings.timeout_seconds)
+                request_kwargs: dict[str, Any] = {"json": payload, "timeout": settings.timeout_seconds}
+                if headers:
+                    request_kwargs["headers"] = dict(headers)
+                response = await client.post(endpoint, **request_kwargs)
                 last_status_code = response.status_code
                 if response.status_code >= 400:
                     raise httpx.HTTPStatusError(
@@ -171,7 +195,7 @@ async def process_delivery_item(item_id: str) -> DeliveryResult | None:
     item = delivery_queue.mark_processing(item_id)
     if item is None:
         return None
-    result = await deliver_to_bitrix(item.endpoint, item.payload)
+    result = await deliver_to_bitrix(item.endpoint, item.payload, headers=resolve_bitrix_auth_headers(item.bot_key))
     if result.delivered:
         delivery_queue.mark_delivered(item.id, result.attempts)
     else:

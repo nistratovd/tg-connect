@@ -112,6 +112,6 @@ def is_encrypted_secret(secret: str | None) -> bool:
 
 def encrypt_config_payload(payload: dict[str, Any]) -> dict[str, Any]:
     encrypted = dict(payload)
-    for field in ("telegram_bot_token", "hmac_secret", "secret"):
+    for field in ("telegram_bot_token", "hmac_secret", "secret", "bitrix_auth_token"):
         encrypted[field] = encrypt_secret(encrypted.get(field))
     return encrypted

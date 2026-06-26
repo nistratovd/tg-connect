@@ -127,12 +127,17 @@ async def _config_from_form(request: Request, bot_id: str | None = None) -> BotC
     telegram_bot_token = str(form.get("telegram_bot_token") or "").strip()
     hmac_secret = str(form.get("hmac_secret") or "").strip() or None
     legacy_secret = str(form.get("secret") or "").strip() or None
+    bitrix_auth_token = str(form.get("bitrix_auth_token") or "").strip() or None
     if existing and is_masked_secret(telegram_bot_token):
         telegram_bot_token = existing.telegram_bot_token
     if existing and is_masked_secret(hmac_secret):
         hmac_secret = existing.hmac_secret
     if existing and is_masked_secret(legacy_secret):
         legacy_secret = existing.secret
+    if existing and is_masked_secret(bitrix_auth_token):
+        bitrix_auth_token = existing.bitrix_auth_token
+    if bitrix_auth_token is None:
+        bitrix_auth_token = existing.bitrix_auth_token if existing and existing.bitrix_auth_token else secrets.token_urlsafe(32)
 
     return BotConfig(
         id=bot_id or str(form.get("id") or form.get("name") or "").strip(),
@@ -145,6 +150,7 @@ async def _config_from_form(request: Request, bot_id: str | None = None) -> BotC
         allowed_ips=str(form.get("allowed_ips") or ""),
         rate_limit=int(form["rate_limit"]) if form.get("rate_limit") else None,
         hmac_secret=hmac_secret,
+        bitrix_auth_token=bitrix_auth_token,
         timestamp_tolerance_seconds=int(form["timestamp_tolerance_seconds"]) if form.get("timestamp_tolerance_seconds") else 300,
         max_request_body_bytes=int(form["max_request_body_bytes"]) if form.get("max_request_body_bytes") else 1024 * 1024,
         created_at=existing.created_at if existing else now,
