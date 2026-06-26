@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from app.security.secrets import decrypt_secret, masked_telegram_token
+from app.security.secrets import decrypt_secret, mask_secret, masked_telegram_token
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -27,6 +27,7 @@ class BotConfig(BaseModel):
     allowed_ips: list[str] = Field(default_factory=list)
     rate_limit: int | None = Field(default=None, ge=1)
     hmac_secret: str | None = None
+    bitrix_auth_token: str | None = Field(default=None, min_length=1)
     timestamp_tolerance_seconds: int = Field(default=300, ge=1)
     max_request_body_bytes: int = Field(default=1024 * 1024, ge=1)
     created_at: datetime = Field(default_factory=utc_now)
@@ -37,7 +38,7 @@ class BotConfig(BaseModel):
     def decrypt_encrypted_secrets(cls, value: Any) -> Any:
         if isinstance(value, dict):
             data = dict(value)
-            for field in ("telegram_bot_token", "hmac_secret", "secret"):
+            for field in ("telegram_bot_token", "hmac_secret", "secret", "bitrix_auth_token"):
                 data[field] = decrypt_secret(data.get(field))
             return data
         return value
@@ -65,3 +66,11 @@ class BotConfig(BaseModel):
     def masked_telegram_bot_token(self) -> str:
         """Безопасная маска Telegram-токена для административного интерфейса."""
         return masked_telegram_token(self.telegram_bot_token)
+
+    @property
+    def masked_bitrix_auth_token(self) -> str:
+        """Безопасная маска токена, передаваемого в Битрикс."""
+        if not self.bitrix_auth_token:
+            return ""
+        masked = mask_secret(self.bitrix_auth_token)
+        return masked if masked != self.bitrix_auth_token else "***"

@@ -16,8 +16,8 @@ class FakeAsyncClient:
     async def __aexit__(self, exc_type, exc, tb):
         return None
 
-    async def post(self, endpoint, *, json, timeout):
-        self.__class__.calls.append({"endpoint": endpoint, "json": json, "timeout": timeout})
+    async def post(self, endpoint, *, json, timeout, headers=None):
+        self.__class__.calls.append({"endpoint": endpoint, "json": json, "timeout": timeout, "headers": headers or {}})
         item = self.__class__.responses.pop(0)
         if isinstance(item, Exception):
             raise item
@@ -62,7 +62,7 @@ def test_forwards_message_update_to_configured_bitrix_endpoint(client):
     assert response.status_code == 200
     assert response.json()["ok"] is True
     assert FakeAsyncClient.calls == [
-        {"endpoint": "https://bitrix.example/webhook", "json": update, "timeout": 1.0}
+        {"endpoint": "https://bitrix.example/webhook", "json": update, "timeout": 1.0, "headers": {}}
     ]
 
 
@@ -129,3 +129,34 @@ def test_returns_404_when_bot_has_no_bitrix_endpoint(client):
         "ok": False,
         "description": "Bitrix webhook URL is not configured for bot unknown",
     }
+
+
+def test_forwards_admin_bitrix_auth_token_in_header(client, monkeypatch, tmp_path):
+    monkeypatch.setenv("ADMIN_STATE_PATH", str(tmp_path / "admin_state.json"))
+    monkeypatch.setenv("TG_CONNECT_MASTER_KEY", "test-master-key")
+    from app.models.bot_config import BotConfig
+    from app.services.admin_store import save_admin_bot_config
+
+    save_admin_bot_config(
+        BotConfig(
+            id="admin-bot",
+            name="admin-alias",
+            telegram_bot_token="123:abc",
+            bitrix_webhook_url="https://bitrix.example/admin-webhook",
+            bitrix_auth_token="bitrix-secret-token",
+        )
+    )
+    FakeAsyncClient.responses = [httpx.Response(200)]
+    update = {"update_id": 2000}
+
+    response = client.post("/webhooks/telegram/admin-bot", json=update)
+
+    assert response.status_code == 200
+    assert FakeAsyncClient.calls == [
+        {
+            "endpoint": "https://bitrix.example/admin-webhook",
+            "json": update,
+            "timeout": 1.0,
+            "headers": {"X-TG-Connect-Token": "bitrix-secret-token"},
+        }
+    ]
