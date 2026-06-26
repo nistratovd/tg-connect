@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import inspect
+import mimetypes
 from collections.abc import Callable, Mapping
+from io import BytesIO
+from pathlib import PurePosixPath
 from typing import Any
 
 from aiogram import Bot
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 from app.models.bot_config import BotConfig
@@ -320,6 +323,47 @@ async def call_bot_method(bot: Bot, method: str, params: dict[str, Any]) -> Any:
 def telegram_response(ok: bool, status_code: int = 200, **payload: Any) -> JSONResponse:
     return JSONResponse(status_code=status_code, content=mask_sensitive({"ok": ok, **payload}))
 
+
+def _download_filename(file_path: str) -> str:
+    filename = PurePosixPath(file_path).name
+    return filename or "telegram-file"
+
+
+def _media_type(file_path: str) -> str:
+    return mimetypes.guess_type(file_path)[0] or "application/octet-stream"
+
+
+async def download_bot_file(bot: Bot, file_path: str) -> BytesIO:
+    destination = BytesIO()
+    result = bot.download_file(file_path, destination=destination)
+    if inspect.isawaitable(result):
+        result = await result
+
+    file_obj = result if isinstance(result, BytesIO) else destination
+    file_obj.seek(0)
+    return file_obj
+
+
+@router.get("/file/bot{token}/{file_path:path}", response_model=None)
+async def telegram_file(token: str, file_path: str):
+    try:
+        if not file_path:
+            raise TelegramCompatError("File path is required")
+        bot = await get_bot(token)
+        file_obj = await download_bot_file(bot, file_path)
+        record_event("outgoing", token, "delivered", {"method": "downloadFile", "file_path": file_path})
+    except TelegramCompatError as exc:
+        record_event("outgoing", token, "error", {"method": "downloadFile", "file_path": file_path}, exc.description)
+        return telegram_response(False, exc.status_code, description=exc.description)
+    except Exception as exc:  # noqa: BLE001 - совместимость с форматом ошибок Telegram Bot API.
+        record_event("outgoing", token, "error", {"method": "downloadFile", "file_path": file_path}, str(exc) or exc.__class__.__name__)
+        return telegram_response(False, 500, description="Internal server error")
+
+    return StreamingResponse(
+        file_obj,
+        media_type=_media_type(file_path),
+        headers={"Content-Disposition": f'inline; filename="{_download_filename(file_path)}"'},
+    )
 
 @router.api_route("/bot{token}/{method}", methods=["GET", "POST"])
 async def telegram_compat(token: str, method: str, request: Request) -> JSONResponse:
