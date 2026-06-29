@@ -2,9 +2,9 @@
 {% if message %}<p class="msg">{{ message }}</p>{% endif %}
 <section class="card">
   <div class="row"><h2>Очередь доставки Telegram → Битрикс</h2><a href="/admin/">К ботам</a></div>
-  <p>Статусы: queued={{ stats.queued }}, processing={{ stats.processing }}, delivered={{ stats.delivered }}, dead_letter={{ stats.dead_letter }}</p>
+  <p>Статусы: queued={{ stats.queued }}, processing={{ stats.processing }}, delivered={{ stats.delivered }}, dead_letter={{ stats.dead_letter }}, canceled={{ stats.canceled }}</p>
   <table>
-    <thead><tr><th>Время</th><th>ID</th><th>Бот</th><th>Update ID</th><th>Endpoint</th><th>Статус</th><th>Попытки</th><th>Ошибка</th></tr></thead>
+    <thead><tr><th>Время</th><th>ID</th><th>Бот</th><th>Update ID</th><th>Endpoint</th><th>Статус</th><th>Попытки</th><th>Ошибка</th><th>Действия</th></tr></thead>
     <tbody>
     {% for item in items %}
       <tr>
@@ -16,9 +16,10 @@
         <td class="{{ 'ok' if item.status == 'delivered' else 'off' if item.status == 'dead_letter' else '' }}">{{ item.status }}</td>
         <td>{{ item.attempts }}</td>
         <td>{{ item.error or "—" }}</td>
+        <td>{% if item.status == "queued" %}<form method="post" action="/admin/delivery/{{ item.id }}/cancel"><button>Отменить</button></form>{% else %}—{% endif %}</td>
       </tr>
     {% else %}
-      <tr><td colspan="8">Очередь пуста.</td></tr>
+      <tr><td colspan="9">Очередь пуста.</td></tr>
     {% endfor %}
     </tbody>
   </table>

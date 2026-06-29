@@ -107,6 +107,16 @@ async def retry_delivery(request: Request, item_id: str, background_tasks: Backg
     return _redirect("/admin/delivery?message=" + quote("Повторная доставка поставлена в очередь"))
 
 
+@router.post("/delivery/{item_id}/cancel")
+async def cancel_delivery(request: Request, item_id: str) -> RedirectResponse:
+    if not _is_authenticated(request):
+        return _redirect("/admin/login")
+    item = delivery_queue.cancel_queued(item_id)
+    if item is None:
+        return _redirect("/admin/delivery?message=" + quote("Можно отменить только событие в статусе queued"))
+    return _redirect("/admin/delivery?message=" + quote("Событие отменено"))
+
+
 @router.get("/bots/new", response_class=HTMLResponse, response_model=None)
 async def new_bot(request: Request) -> HTMLResponse | RedirectResponse:
     return _render(request, "bot_form.html", bot=None, errors=[])
