@@ -22,16 +22,16 @@ TG Connect — сервис-маршрутизатор между Telegram Bot A
   - allowlist IP;
   - rate limit;
   - ограничение размера тела запроса.
-- Шифрование Telegram token/HMAC secret/legacy secret в локальном state-файле.
+- Шифрование Telegram token/HMAC secret/legacy secret перед сохранением в базе данных.
 - Маскирование секретов в событиях и ответах.
 - Дедупликация Telegram updates по `update_id` на уровне persistent delivery queue.
-- File-backed delivery queue, background-доставка и dead-letter фиксация ошибок доставки.
+- DB-backed delivery queue, background-доставка, отмена queued-событий и dead-letter фиксация ошибок доставки.
 - Health и metrics endpoints:
   - `/health/live`;
   - `/health/ready`;
   - `/metrics`.
 
-> Важно: текущая очередь доставки хранится в JSON-файле и переживает рестарт одного процесса, но для production с несколькими инстансами ее следует заменить на PostgreSQL/Redis/RabbitMQ-backed backend. Rate limit пока остается in-memory.
+> Важно: runtime-состояние приложения хранится в SQLite базе, путь задается через `DATABASE_URL`. Rate limit пока остается in-memory.
 
 ---
 
@@ -103,6 +103,7 @@ pip install -e .
 export TG_CONNECT_MASTER_KEY='replace-with-long-random-master-key'
 export ADMIN_PASSWORD='change-me'
 export ADMIN_SESSION_TOKEN='change-me-session-token'
+export DATABASE_URL='sqlite:///data/tg_connect.db'
 ```
 
 Для генерации ключей можно использовать:
@@ -159,7 +160,7 @@ WorkingDirectory=/opt/tg-connect
 Environment=TG_CONNECT_MASTER_KEY=replace-with-long-random-master-key
 Environment=ADMIN_PASSWORD=change-me
 Environment=ADMIN_SESSION_TOKEN=change-me-session-token
-Environment=ADMIN_STATE_PATH=/var/lib/tg-connect/admin_state.json
+Environment=DATABASE_URL=sqlite:////var/lib/tg-connect/tg_connect.db
 ExecStart=/opt/tg-connect/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
 Restart=always
 RestartSec=5
@@ -205,6 +206,83 @@ server {
 
 ---
 
+## Установка и настройка базы данных
+
+По умолчанию TG Connect использует встроенную SQLite базу. Отдельный сервер БД не нужен: достаточно каталога, доступного на запись пользователю приложения.
+
+### 1. Установить SQLite CLI для диагностики
+
+Ubuntu/Debian:
+
+```bash
+sudo apt update
+sudo apt install -y sqlite3
+```
+
+CentOS/RHEL/Rocky:
+
+```bash
+sudo dnf install -y sqlite
+```
+
+> Python-драйвер SQLite входит в стандартную библиотеку Python, поэтому отдельный pip-пакет для работы приложения не требуется.
+
+### 2. Создать каталог для базы
+
+```bash
+sudo mkdir -p /var/lib/tg-connect
+sudo chown tg-connect:tg-connect /var/lib/tg-connect
+sudo chmod 750 /var/lib/tg-connect
+```
+
+### 3. Настроить переменную `DATABASE_URL`
+
+Для production/systemd рекомендуется абсолютный путь:
+
+```bash
+export DATABASE_URL='sqlite:////var/lib/tg-connect/tg_connect.db'
+```
+
+Для локального запуска можно оставить значение по умолчанию или указать относительный путь:
+
+```bash
+export DATABASE_URL='sqlite:///data/tg_connect.db'
+```
+
+### 4. Запустить приложение
+
+Таблицы создаются автоматически при старте приложения или первом обращении к хранилищу. Для проверки можно выполнить:
+
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+После первого запуска проверьте файл базы:
+
+```bash
+sqlite3 /var/lib/tg-connect/tg_connect.db '.tables'
+```
+
+Ожидаемые таблицы:
+
+- `admin_bots` — настройки ботов;
+- `admin_events` — события административной панели;
+- `delivery_queue` — очередь Telegram → Битрикс, включая `queued`, `processing`, `delivered`, `dead_letter` и `canceled`.
+
+### 5. Миграция с JSON
+
+Если раньше использовались `ADMIN_STATE_PATH` и `DELIVERY_QUEUE_PATH`, перенесите настройки ботов вручную через административную панель либо временно запустите старую версию и сохраните конфигурацию. Новая версия пишет данные в SQLite, а legacy JSON-пути оставлены только для совместимости/диагностики. Перед переключением сделайте резервную копию JSON-файлов и новой базы.
+
+### 6. Резервное копирование
+
+Для SQLite используйте online backup, чтобы не копировать файл во время записи:
+
+```bash
+sqlite3 /var/lib/tg-connect/tg_connect.db ".backup '/var/backups/tg-connect-$(date +%F).db'"
+```
+
+---
+
 ## Переменные окружения
 
 ### Основные
@@ -216,7 +294,9 @@ server {
 | `TG_CONNECT_MASTER_KEY_CMD` | Нет | Команда, возвращающая master key. Использовать осторожно. |
 | `ADMIN_PASSWORD` | Рекомендуется | Пароль входа в админку. По умолчанию — `admin`, что небезопасно. |
 | `ADMIN_SESSION_TOKEN` | Рекомендуется | Значение cookie-сессии админки. Если не задано, используется `ADMIN_PASSWORD`. |
-| `ADMIN_STATE_PATH` | Нет | Путь к JSON-файлу состояния админки. По умолчанию `data/admin_state.json`. |
+| `DATABASE_URL` | Нет | URL SQLite базы данных. По умолчанию `sqlite:///data/tg_connect.db`. |
+| `ADMIN_STATE_PATH` | Нет | Устаревший путь JSON-state. Если задан, используется только для совместимого зеркала и выбора SQLite-файла в тестах/legacy окружениях. |
+| `DELIVERY_QUEUE_PATH` | Нет | Устаревший путь JSON-очереди. Если задан, используется только для совместимого зеркала и выбора SQLite-файла в тестах/legacy окружениях. |
 
 ### Конфигурация ботов через env
 
