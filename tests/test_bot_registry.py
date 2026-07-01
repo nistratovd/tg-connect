@@ -3,7 +3,7 @@ import asyncio
 import pytest
 
 from app.models.bot_config import BotConfig
-from app.services.bot_registry import BotRegistry, BotRegistryError
+from app.services.bot_registry import BotRegistry, BotRegistryError, load_bot_configs_from_env
 
 
 class FakeSession:
@@ -78,3 +78,34 @@ def test_registry_rejects_duplicate_aliases() -> None:
 
     with pytest.raises(BotRegistryError, match="Duplicate bot alias"):
         asyncio.run(registry.load_active_bots())
+
+
+def test_env_configs_do_not_duplicate_admin_configs(monkeypatch) -> None:
+    admin_config = BotConfig(id="welcome_bb", name="welcome", telegram_bot_token="123:admin")
+    monkeypatch.setattr("app.services.bot_registry.load_admin_bot_configs", lambda: [admin_config])
+    monkeypatch.setenv(
+        "TELEGRAM_BOT_CONFIGS",
+        '[{"id":"welcome_bb","name":"welcome-env","telegram_bot_token":"456:env"},'
+        '{"id":"support","name":"support","telegram_bot_token":"789:env"}]',
+    )
+
+    configs = load_bot_configs_from_env()
+
+    assert [(config.id, config.telegram_bot_token) for config in configs] == [
+        ("welcome_bb", "123:admin"),
+        ("support", "789:env"),
+    ]
+
+
+def test_legacy_aliases_do_not_duplicate_admin_configs(monkeypatch) -> None:
+    admin_config = BotConfig(id="welcome_bb", name="welcome_bb", telegram_bot_token="123:admin")
+    monkeypatch.setattr("app.services.bot_registry.load_admin_bot_configs", lambda: [admin_config])
+    monkeypatch.delenv("TELEGRAM_BOT_CONFIGS", raising=False)
+    monkeypatch.setenv("TELEGRAM_BOT_ALIASES", '{"welcome_bb":"456:env","support":"789:env"}')
+
+    configs = load_bot_configs_from_env()
+
+    assert [(config.id, config.telegram_bot_token) for config in configs] == [
+        ("welcome_bb", "123:admin"),
+        ("support", "789:env"),
+    ]
