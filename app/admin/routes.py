@@ -17,6 +17,7 @@ from app.security.secrets import is_masked_secret
 from app.services.admin_store import (
     check_bitrix,
     check_telegram,
+    delete_admin_bot_config,
     get_admin_bot_config,
     load_admin_bot_configs,
     recent_events,
@@ -209,6 +210,17 @@ async def toggle_bot(request: Request, bot_id: str) -> RedirectResponse:
     await registry.reload()
     await telegram_runner.reload()
     return _redirect_with_message("Статус бота изменен")
+
+
+@router.post("/bots/{bot_id}/delete")
+async def delete_bot(request: Request, bot_id: str) -> RedirectResponse:
+    if not _is_authenticated(request):
+        return _redirect("/admin/login")
+    if not delete_admin_bot_config(bot_id):
+        return _redirect_with_message("Бот не найден")
+    await registry.reload()
+    await telegram_runner.reload()
+    return _redirect_with_message("Бот удален")
 
 
 @router.post("/bots/{bot_id}/check")

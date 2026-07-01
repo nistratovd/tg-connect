@@ -116,6 +116,24 @@ class BotRegistry:
                 await result
 
 
+def _merge_admin_and_static_configs(
+    admin_configs: list[BotConfig],
+    static_configs: Iterable[BotConfig],
+) -> list[BotConfig]:
+    """Объединяет admin- и env-конфиги, оставляя приоритет за admin-хранилищем."""
+    admin_ids = {config.id for config in admin_configs}
+    admin_names = {config.name for config in admin_configs}
+    admin_tokens = {config.telegram_bot_token for config in admin_configs}
+    deduplicated_static_configs = [
+        config
+        for config in static_configs
+        if config.id not in admin_ids
+        and config.name not in admin_names
+        and config.telegram_bot_token not in admin_tokens
+    ]
+    return [*admin_configs, *deduplicated_static_configs]
+
+
 def load_bot_configs_from_env() -> list[BotConfig]:
     """Читает конфигурации из TELEGRAM_BOT_CONFIGS.
 
@@ -128,7 +146,8 @@ def load_bot_configs_from_env() -> list[BotConfig]:
     if raw_configs:
         try:
             payload = json.loads(raw_configs)
-            return [*admin_configs, *TypeAdapter(list[BotConfig]).validate_python(payload)]
+            static_configs = TypeAdapter(list[BotConfig]).validate_python(payload)
+            return _merge_admin_and_static_configs(admin_configs, static_configs)
         except (json.JSONDecodeError, ValidationError) as exc:
             raise BotRegistryError("Invalid TELEGRAM_BOT_CONFIGS JSON") from exc
 
@@ -143,11 +162,11 @@ def load_bot_configs_from_env() -> list[BotConfig]:
     ):
         raise BotRegistryError("TELEGRAM_BOT_ALIASES must be a JSON object with string values")
 
-    return [
-        *admin_configs,
-        *(BotConfig(id=alias, name=alias, telegram_bot_token=token, bitrix_webhook_url=None)
-        for alias, token in aliases.items()),
-    ]
+    alias_configs = (
+        BotConfig(id=alias, name=alias, telegram_bot_token=token, bitrix_webhook_url=None)
+        for alias, token in aliases.items()
+    )
+    return _merge_admin_and_static_configs(admin_configs, alias_configs)
 
 
 registry = BotRegistry()

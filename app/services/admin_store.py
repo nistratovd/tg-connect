@@ -68,6 +68,17 @@ def get_admin_bot_config(bot_id: str) -> BotConfig | None:
     return None
 
 
+def delete_admin_bot_config(bot_id: str) -> bool:
+    """Удаляет конфигурацию бота из административного хранилища."""
+    init_db()
+    with connect() as conn:
+        cursor = conn.execute("DELETE FROM admin_bots WHERE id = ?", (bot_id,))
+        deleted = cursor.rowcount > 0
+    if deleted:
+        _mirror_legacy_state_file()
+    return deleted
+
+
 def record_event(direction: str, bot_key: str, status: str, payload: Any | None = None, error: str | None = None) -> None:
     init_db()
     event_id = secrets.token_hex(8)
