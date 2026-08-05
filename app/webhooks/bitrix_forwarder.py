@@ -4,11 +4,12 @@ import asyncio
 import json
 import logging
 import os
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any
 
 import httpx
 from aiogram import Bot
+from aiogram.client.default import Default
 from aiogram.types import Update
 from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.responses import JSONResponse
@@ -113,9 +114,42 @@ def resolve_bitrix_endpoint(bot_key: str) -> str:
     return endpoint
 
 
+_OMIT = object()
+
+
+def _drop_aiogram_defaults(value: Any) -> Any:
+    """Удаляет aiogram Default sentinels, которые не сериализуются Pydantic."""
+    if isinstance(value, Default):
+        return _OMIT
+    if isinstance(value, Mapping):
+        cleaned_mapping = {
+            key: cleaned
+            for key, item in value.items()
+            if (cleaned := _drop_aiogram_defaults(item)) is not _OMIT
+        }
+        return cleaned_mapping or _OMIT
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [
+            cleaned
+            for item in value
+            if (cleaned := _drop_aiogram_defaults(item)) is not _OMIT
+        ]
+    return value
+
+
 def serialize_update(update: Update) -> dict[str, Any]:
     """Формирует JSON, максимально близкий к Telegram webhook update."""
-    return update.model_dump(mode="json", by_alias=True, exclude_none=True)
+    try:
+        return update.model_dump(mode="json", by_alias=True, exclude_none=True)
+    except ValueError as exc:
+        if "aiogram.client.default.Default" not in str(exc):
+            raise
+        logger.warning("Telegram update содержит aiogram Default sentinel; сериализуем без этих служебных значений")
+        payload = update.model_dump(mode="python", by_alias=True, exclude_none=True)
+        cleaned_payload = _drop_aiogram_defaults(payload)
+        if not isinstance(cleaned_payload, dict):
+            raise
+        return cleaned_payload
 
 
 async def parse_update(request: Request, bot: Bot | None = None) -> Update:

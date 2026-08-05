@@ -1,5 +1,7 @@
 import httpx
 import pytest
+from aiogram.client.default import Default
+from aiogram.types import Chat, LinkPreviewOptions, Message, Update
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -160,3 +162,26 @@ def test_forwards_admin_bitrix_auth_token_in_header(client, monkeypatch, tmp_pat
             "headers": {"X-TG-Connect-Token": "bitrix-secret-token"},
         }
     ]
+
+
+def test_serializes_long_polling_update_with_aiogram_default_sentinels():
+    update = Update(
+        update_id=3000,
+        message=Message(
+            message_id=1,
+            date=1710000000,
+            chat=Chat(id=10, type="private"),
+            text="https://example.com",
+            link_preview_options=LinkPreviewOptions(is_disabled=Default("link_preview_is_disabled")),
+        ),
+    )
+
+    assert bitrix_forwarder.serialize_update(update) == {
+        "update_id": 3000,
+        "message": {
+            "message_id": 1,
+            "date": 1710000000,
+            "chat": {"id": 10, "type": "private"},
+            "text": "https://example.com",
+        },
+    }
