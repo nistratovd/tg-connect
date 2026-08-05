@@ -183,6 +183,5 @@ def test_serializes_long_polling_update_with_aiogram_default_sentinels():
             "date": 1710000000,
             "chat": {"id": 10, "type": "private"},
             "text": "https://example.com",
-            "link_preview_options": {},
         },
     }

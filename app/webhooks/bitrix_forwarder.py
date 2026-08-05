@@ -114,21 +114,25 @@ def resolve_bitrix_endpoint(bot_key: str) -> str:
     return endpoint
 
 
+_OMIT = object()
+
+
 def _drop_aiogram_defaults(value: Any) -> Any:
     """Удаляет aiogram Default sentinels, которые не сериализуются Pydantic."""
     if isinstance(value, Default):
-        return None
+        return _OMIT
     if isinstance(value, Mapping):
-        return {
+        cleaned_mapping = {
             key: cleaned
             for key, item in value.items()
-            if (cleaned := _drop_aiogram_defaults(item)) is not None
+            if (cleaned := _drop_aiogram_defaults(item)) is not _OMIT
         }
+        return cleaned_mapping or _OMIT
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
         return [
             cleaned
             for item in value
-            if (cleaned := _drop_aiogram_defaults(item)) is not None
+            if (cleaned := _drop_aiogram_defaults(item)) is not _OMIT
         ]
     return value
 
